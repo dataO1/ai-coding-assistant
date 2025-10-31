@@ -11,11 +11,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
-# Use absolute imports instead of relative
 from ai_agent_runtime.orchestrator import MultiAgentOrchestrator
+from ai_agent_runtime.utils import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
+
 # ============================================================================
 # Configuration - FROM ENVIRONMENT (set by systemd)
 # ============================================================================
@@ -35,22 +35,14 @@ if MANIFESTS_PATH.exists():
 else:
     logger.warning(f"Manifests file not found: {MANIFESTS_PATH}")
 
-# Mock MCP registry
-class MockMCPRegistry:
-    def resolve_tools(self, manifest, context):
-        return []
-
-mcp_registry = MockMCPRegistry()
-
-# Initialize orchestrator
+# Initialize orchestrator (only needs ollama_url and pipeline_manifests)
 orchestrator = MultiAgentOrchestrator(
     ollama_url=OLLAMA_URL,
-    mcp_registry=mcp_registry,
     pipeline_manifests=manifests.get("pipelines", {}),
 )
 
 # ============================================================================
-# FastAPI
+# FastAPI App
 # ============================================================================
 
 class QueryRequest(BaseModel):
@@ -62,31 +54,95 @@ class QueryRequest(BaseModel):
 async def lifespan(app: FastAPI):
     logger.info(f"Starting AI Agent on port {AGENT_PORT}")
     yield
+    logger.info("Shutting down AI Agent")
 
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    title="AI Agent Orchestrator",
+    description="Multi-agent system with intelligent routing",
+    lifespan=lifespan,
+)
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "pipelines": len(manifests.get("pipelines", {}))}
+    return {
+        "status": "healthy",
+        "pipelines": len(manifests.get("pipelines", {})),
+    }
 
 @app.get("/api/pipelines")
 async def list_pipelines():
+    """List all available pipelines"""
     return [
-        {"name": name, "description": p.get("description", "")}
-        for name, p in manifests.get("pipelines", {}).items()
+        {
+            "name": name,
+            "description": pipeline.get("description", ""),
+            "model": pipeline.get("model", ""),
+        }
+        for name, pipeline in manifests.get("pipelines", {}).items()
     ]
 
 @app.post("/api/query")
 async def query(request: QueryRequest):
-    result = await orchestrator.execute(request.query, request.context)
-    return result
+    """Query the orchestrator"""
+    logger.info(f"Processing query in context '{request.context}'")
+
+    try:
+        result = await orchestrator.execute(
+            query=request.query,
+            context=request.context,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Error processing query: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/v1/models")
+async def list_models():
+    """OpenAI-compatible models endpoint"""
+    return {
+        "object": "list",
+        "data": [
+            {
+                "id": name,
+                "object": "model",
+                "owned_by": "local",
+            }
+            for name in manifests.get("pipelines", {}).keys()
+        ]
+    }
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: dict):
+    """OpenAI-compatible chat endpoint for Continue.dev, Avante"""
     messages = request.get("messages", [])
     query_text = messages[-1]["content"] if messages else ""
-    result = await orchestrator.execute(query_text, "nvim")
-    return {
-        "object": "chat.completion",
-        "choices": [{"message": {"role": "assistant", "content": result["response"]}}],
-    }
+
+    try:
+        result = await orchestrator.execute(query_text, "nvim")
+
+        return {
+            "id": "local",
+            "object": "chat.completion",
+            "model": "supervisor",
+            "choices": [
+                {
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": result["response"],
+                    },
+                    "finish_reason": "stop",
+                }
+            ],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0,
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error in chat completions: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT, log_level="info")
