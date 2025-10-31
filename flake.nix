@@ -166,7 +166,7 @@
 
             systemd.services.flowise-init = {
               description = "Initialize Flowise Admin Account";
-              after = [ "flowise-image-pull.service" "postgresql.service" ];
+              after = [ "flowise.service" "postgresql.service" ];
               requires = [ "flowise-image-pull.service" "postgresql.service" ];
               wantedBy = [ "multi-user.target" ];
 
@@ -216,7 +216,7 @@
             # Flowise Docker service with pinned version
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
-              after = [ "flowise-init.service" "flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              after = ["flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
               wants = [ "network-online.target" ];
               requires = [ "flowise-image-pull.service" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
