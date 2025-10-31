@@ -130,23 +130,33 @@
               enableNvidia = cfg.gpuAcceleration;
             };
 
+            # Add this service before the flowise service
+            systemd.services.flowise-image-pull = {
+              description = "Pre-pull Flowise Docker Image";
+              after = [ "docker.service" ];
+              requires = [ "docker.service" ];
+              wantedBy = [ "multi-user.target" ];
+
+              serviceConfig = {
+                Type = "oneshot";
+                RemainAfterExit = true;
+                TimeoutStartSec = "10min";  # Generous timeout for slow connections
+                ExecStart = "${pkgs.docker}/bin/docker pull flowiseai/flowise:${cfg.flowiseVersion}";
+              };
+            };
+
             # Flowise Docker service with pinned version
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
-              after = [ "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
-              wants = [ "network-online.target" ];
-              requires = [ "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              after = [ "flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              requires = [ "flowise-image-pull.service" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
               serviceConfig = {
                 Type = "simple";
-
-                # Increase timeout for image pull (5 minutes should be enough)
-                TimeoutStartSec = "5min";
+                TimeoutStartSec = "2min";  # Can be shorter now
 
                 ExecStartPre = [
-                  # Pull specific version with increased timeout
-                  "${pkgs.docker}/bin/docker pull flowiseai/flowise:${cfg.flowiseVersion}"
-                  # Clean up any existing container
+                  # No pull needed, just cleanup
                   "-${pkgs.docker}/bin/docker rm -f flowise"
                 ];
                 ExecStart = pkgs.writeShellScript "start-flowise" ''
