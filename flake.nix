@@ -58,7 +58,12 @@
             };
           flowisePassword = lib.mkOption {
             type = lib.types.str;
-            default = "changeme";
+            description = "Admain user email (acts as your username)";
+            example = "test@test.de";
+          };
+
+          flowiseEmail = lib.mkOption {
+            type = lib.types.str;
             description = "Password for Flowise dashboard login.";
             example = "MySecure@Pass123!";
           };
@@ -267,7 +272,7 @@
                   FLOWISE_URL="http://localhost:3000"
                   FLOWISE_ADMIN_USER="admin"
                   FLOWISE_ADMIN_PASS="${cfg.flowisePassword}"
-                  FLOWISE_EMAIL="admin@localhost"
+                  FLOWISE_EMAIL="${cfg.flowiseEmail}"
                   FLOWS_DIR="/var/lib/flowise/flows"
                   API_KEY_FILE="/var/lib/flowise/.flowise-api-key"
 
