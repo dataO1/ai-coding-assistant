@@ -50,23 +50,23 @@
           workflowJson = builtins.toJSON mainWorkflow;
         in
         {
-          options.aiCodingAssistant = {
-            gpuAcceleration = lib.mkOption {
+          gpuAcceleration = lib.mkOption {
               type = lib.types.bool;
               default = true;
               description = "Enable GPU acceleration for Ollama.";
             };
-          flowisePassword = lib.mkOption {
-            type = lib.types.str;
-            description = "Admain user email (acts as your username)";
-            example = "test@test.de";
-          };
 
-          flowiseEmail = lib.mkOption {
-            type = lib.types.str;
-            description = "Password for Flowise dashboard login.";
-            example = "MySecure@Pass123!";
-          };
+            flowiseEmail = lib.mkOption {
+              type = lib.types.str;
+              description = "Admin user email (acts as your login username).";
+              example = "admin@localhost";
+            };
+
+            flowisePassword = lib.mkOption {
+              type = lib.types.str;
+              description = "Password for Flowise dashboard login.";
+              example = "MySecure@Pass123!";
+            };
 
           # Add assertion to validate password
             flowiseSecretKey = lib.mkOption {
@@ -138,11 +138,11 @@
             users.groups.flowise = {};
 
             # Setup Flowise configs directly in home
-            system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "users" "groups" ] ''
+          # Setup Flowise configs AFTER PostgreSQL is ready
+            system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "postgresql" "setFlowisePassword" ] ''
               FLOWISE_HOME="/var/lib/flowise"
               FLOWS_DIR="$FLOWISE_HOME/flows"
               CONFIG_SOURCE="${self}/flowise-config"
-              API_KEY_FILE="/var/lib/flowise/.flowise-api-key"
 
               echo "Setting up Flowise configuration..."
 
@@ -155,26 +155,30 @@
                 echo "✅ Workflow JSON files copied"
               fi
 
-              # Generate API key directly in database if it doesn't exist
-              if [ ! -f "$API_KEY_FILE" ]; then
-                echo "Generating API key in database..."
+              # Import workflows into database (no public API endpoint for this)
+              echo "Importing workflows into database..."
 
-                # Generate a random API key
-                API_KEY=$(${pkgs.openssl}/bin/openssl rand -hex 32)
+              for json_file in "$FLOWS_DIR"/*.json; do
+                if [ -f "$json_file" ]; then
+                  FLOW_NAME=$(basename "\'\'${json_file%.json}")
+                  FLOW_DATA=$(${pkgs.jq}/bin/jq -c . "$json_file")
 
-                # Insert into database
-                ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
-                  INSERT INTO api_key (apiKey, "keyName", "createdDate")
-                  VALUES ('$API_KEY', 'system-init', NOW())
-                  ON CONFLICT DO NOTHING;
-            SQL
+                  # Escape single quotes for SQL
+                  FLOW_DATA_ESCAPED=$(echo "$FLOW_DATA" | sed "s/'/\'\'/g")
 
-                echo "$API_KEY" > "$API_KEY_FILE"
-                chmod 600 "$API_KEY_FILE"
-                chown flowise:flowise "$API_KEY_FILE"
-                echo "✅ API key created: $API_KEY_FILE"
-              fi
-              '';
+                  # Insert into database
+                  ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
+                    INSERT INTO chat_flow (name, "flowData", "createdDate", "updatedDate")
+                    VALUES ('$FLOW_NAME', '$FLOW_DATA_ESCAPED', NOW(), NOW())
+                    ON CONFLICT (name) DO UPDATE SET
+                      "flowData" = EXCLUDED."flowData",
+                      "updatedDate" = NOW();
+                  SQL
+
+                  echo "✅ Imported: $FLOW_NAME"
+                fi
+              done
+            '';
 
             environment.sessionVariables = {
               SUPERVISOR_AGENT_MODEL = cfg.supervisorAgentModel;
@@ -222,6 +226,7 @@
               '';
             };
 
+
             services.chromadb = {
               enable = true;
               host = "127.0.0.1";
@@ -239,11 +244,12 @@
             };
 
             # Add activation script to set PostgreSQL password
-            system.activationScripts.setFlowisePassword = lib.stringAfter [ "users" ] ''
-              # Set password for flowise user
-              ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -c "ALTER USER flowise WITH PASSWORD '${cfg.databasePassword}';" || true
+          # Set PostgreSQL password AFTER database is ready
+            system.activationScripts.setFlowisePassword = lib.stringAfter [ "postgresql" ] ''
+              echo "Setting Flowise database user password..."
+              ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -c "ALTER USER flowise WITH PASSWORD '${cfg.databasePassword}';" 2>/dev/null || true
+              echo "✅ Database password set"
             '';
-
             # Add this service before the flowise service
             systemd.services.flowise-image-pull = {
               description = "Pre-pull Flowise Docker Image";
