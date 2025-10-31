@@ -275,7 +275,7 @@
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
               after = ["network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
               wants = [ "network-online.target" ];
-              requires = ["postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              requires = [ "flowise-image-pull.service" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
               serviceConfig = {
                 Type = "simple";
