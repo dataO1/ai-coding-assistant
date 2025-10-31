@@ -164,10 +164,59 @@
               };
             };
 
+            systemd.services.flowise-init = {
+              description = "Initialize Flowise Admin Account";
+              after = [ "flowise-image-pull.service" "postgresql.service" ];
+              requires = [ "flowise-image-pull.service" "postgresql.service" ];
+              wantedBy = [ "multi-user.target" ];
+
+              serviceConfig = {
+                Type = "oneshot";
+                RemainAfterExit = true;
+
+                ExecStart = pkgs.writeShellScript "init-flowise" ''
+                  # Wait for Flowise to be ready
+                  for i in {1..30}; do
+                    if ${pkgs.curl}/bin/curl -s http://localhost:3000 >/dev/null 2>&1; then
+                      echo "Flowise is ready, checking if setup is needed..."
+
+                      # Check if setup page is showing (indicates no account exists)
+                      RESPONSE=$(${pkgs.curl}/bin/curl -s http://localhost:3000/api/v1/verify)
+
+                      if echo "$RESPONSE" | grep -q "error\|unauthorized"; then
+                        echo "Creating admin account..."
+
+                        # Create account via API
+                        ${pkgs.curl}/bin/curl -X POST http://localhost:3000/api/v1/setup \
+                          -H "Content-Type: application/json" \
+                          -d '{
+                            "existingUsername": "admin",
+                            "existingPassword": "${cfg.flowisePassword}",
+                            "username": "Admin",
+                            "email": "admin@localhost",
+                            "password": "${cfg.flowisePassword}"
+                          }'
+
+                        echo "Admin account created"
+                      else
+                        echo "Account already exists, skipping setup"
+                      fi
+
+                      exit 0
+                    fi
+                    sleep 2
+                  done
+
+                  echo "Warning: Could not connect to Flowise for initialization"
+                  exit 0  # Don't fail, user can setup manually
+                '';
+              };
+            };
+
             # Flowise Docker service with pinned version
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
-              after = [ "flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              after = [ "flowise-init.service" "flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
               wants = [ "network-online.target" ];
               requires = [ "flowise-image-pull.service" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
