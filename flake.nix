@@ -245,14 +245,16 @@
 
                 ExecStart = pkgs.writeShellScript "init-flowise" ''
                   FLOWISE_URL="http://localhost:3000"
-                  FLOWISE_USER="admin"
-                  FLOWISE_PASS="${cfg.flowisePassword}"
+                  FLOWISE_ADMIN_USER="admin"
+                  FLOWISE_ADMIN_PASS="${cfg.flowisePassword}"
+                  FLOWISE_EMAIL="admin@localhost"
                   FLOWS_DIR="/var/lib/flowise/flows"
+                  API_KEY_FILE="/var/lib/flowise/.flowise-api-key"
 
                   echo "Waiting for Flowise to start..."
                   for i in {1..60}; do
                     if ${pkgs.curl}/bin/curl -s "$FLOWISE_URL" >/dev/null 2>&1; then
-                      echo "Flowise is ready"
+                      echo "✅ Flowise is ready"
                       break
                     fi
                     sleep 2
@@ -260,62 +262,94 @@
 
                   # Setup admin account if needed
                   echo "Checking if admin account exists..."
-                  VERIFY=$(${pkgs.curl}/bin/curl -s -u admin:${cfg.flowisePassword} "$FLOWISE_URL/api/v1/verify")
+                  VERIFY=$(${pkgs.curl}/bin/curl -s -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" "$FLOWISE_URL/api/v1/verify")
 
-                  if echo "$VERIFY" | grep "Unauthorized"; then
+                  if echo "$VERIFY" | grep -q "Unauthorized"; then
                     echo "Creating admin account..."
                     ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
-                      -u admin:${cfg.flowisePassword} \
+                      -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
                       -H "Content-Type: application/json" \
-                      -d '{
-                        "existingUsername": "admin",
-                        "existingPassword": "${cfg.flowisePassword}",
-                        "username": "Admin",
-                        "email": "admin@localhost",
-                        "password": "${cfg.flowisePassword}"
-                      }' >/dev/null
+                      -d "{
+                        \"existingUsername\": \"admin\",
+                        \"existingPassword\": \"$FLOWISE_ADMIN_PASS\",
+                        \"username\": \"Admin\",
+                        \"email\": \"$FLOWISE_EMAIL\",
+                        \"password\": \"$FLOWISE_ADMIN_PASS\"
+                      }" >/dev/null
                     echo "✅ Admin account created"
+                    sleep 2
                   else
                     echo "✅ Admin account already exists"
                   fi
 
-                  # Get auth token
-                  echo "Authenticating with Flowise..."
-                  AUTH_RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/auth/login" \
-                    -H "Content-Type: application/json" \
-                    -d "{
-                      \"username\": \"admin@localhost\",
-                      \"password\": \"${cfg.flowisePassword}\"
-                    }")
+                  # Generate API key if not exists
+                  if [ ! -f "$API_KEY_FILE" ]; then
+                    echo "Generating API key..."
 
-                  TOKEN=$(echo "$AUTH_RESPONSE" | ${pkgs.jq}/bin/jq -r '.token // empty')
+                    # Get auth token via setup endpoint
+                    TOKEN=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
+                      -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
+                      -H "Content-Type: application/json" \
+                      -d "{
+                        \"existingUsername\": \"admin\",
+                        \"existingPassword\": \"$FLOWISE_ADMIN_PASS\",
+                        \"username\": \"Admin\",
+                        \"email\": \"$FLOWISE_EMAIL\",
+                        \"password\": \"$FLOWISE_ADMIN_PASS\"
+                      }" | ${pkgs.jq}/bin/jq -r '.token // empty')
 
-                  if [ -z "$TOKEN" ]; then
-                    echo "⚠️  Could not authenticate with Flowise"
-                    exit 0
+                    if [ -z "$TOKEN" ]; then
+                      echo "⚠️  Could not get auth token, skipping API key generation"
+                    else
+                      # Create API key
+                      API_KEY=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/apikey" \
+                        -H "Authorization: Bearer $TOKEN" \
+                        -H "Content-Type: application/json" \
+                        -d '{"keyName": "system-init"}' | ${pkgs.jq}/bin/jq -r '.apiKey // empty')
+
+                      if [ -n "$API_KEY" ]; then
+                        echo "$API_KEY" > "$API_KEY_FILE"
+                        chmod 600 "$API_KEY_FILE"
+                        chown flowise:flowise "$API_KEY_FILE"
+                        echo "✅ API key generated and saved"
+                      fi
+                    fi
+                  else
+                    echo "✅ API key already exists"
                   fi
 
-                  echo "✅ Authentication successful"
-
                   # Import workflow JSON files
-                  if [ -d "$FLOWS_DIR" ]; then
-                    echo "Importing workflows from $FLOWS_DIR..."
+                  if [ -d "$FLOWS_DIR" ] && [ -f "$API_KEY_FILE" ]; then
+                    API_KEY=$(cat "$API_KEY_FILE")
+                    echo "Importing workflows using API key..."
 
                     for json_file in "$FLOWS_DIR"/*.json; do
                       if [ -f "$json_file" ]; then
                         filename=$(basename "$json_file")
                         echo "Importing $filename..."
 
-                        # Import via API
-                        ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/flows" \
-                          -H "Authorization: Bearer $TOKEN" \
+                        RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/flows" \
+                          -H "Authorization: Bearer $API_KEY" \
                           -H "Content-Type: application/json" \
-                          -d @"$json_file" >/dev/null 2>&1 || true
+                          -d @"$json_file")
+
+                        if echo "$RESPONSE" | ${pkgs.jq}/bin/jq . >/dev/null 2>&1; then
+                          ID=$(echo "$RESPONSE" | ${pkgs.jq}/bin/jq -r '.id // empty')
+                          if [ -n "$ID" ]; then
+                            echo "✅ Imported: $filename (ID: $ID)"
+                          else
+                            echo "⚠️  Import response unclear for $filename"
+                          fi
+                        else
+                          echo "⚠️  Failed to import $filename"
+                        fi
                       fi
                     done
-
-                    echo "✅ Workflows imported"
+                  else
+                    echo "⚠️  API key or flows directory not found, skipping import"
                   fi
+
+                  echo "✅ Flowise initialization complete"
                 '';
               };
             };
