@@ -128,6 +128,18 @@
               after = [ "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" ];
               wants = [ "network-online.target" ];
               requires = [ "postgresql.service" "chromadb.service" "ollama.service" ];
+
+              # Add PATH with necessary build tools
+              path = with pkgs; [
+                nodejs_22
+                bash
+                coreutils
+                gcc
+                gnumake
+                python3
+                git
+              ];
+
               serviceConfig = {
                 Type = "simple";
                 User = "flowise";
@@ -135,6 +147,8 @@
                 ExecStart = "${pkgs.nodejs_22}/bin/npx flowise start";
                 WorkingDirectory = "/var/lib/flowise";
                 Restart = "on-failure";
+                RestartSec = "30s";  # Wait 30s between restart attempts
+
                 Environment = [
                   "FLOWISE_USERNAME=admin"
                   "FLOWISE_PASSWORD=${cfg.flowisePassword}"
@@ -150,10 +164,20 @@
                   "CODE_AGENT_MODEL=${cfg.codeAgentModel}"
                   "CODE_THINKING_AGENT_MODEL=${cfg.codeThinkingAgentModel}"
                   "KNOWLEDGE_AGENT_MODEL=${cfg.knowledgeAgentModel}"
+                  # Set npm cache and install dirs
+                  "NPM_CONFIG_CACHE=/var/lib/flowise/.npm"
+                  "HOME=/var/lib/flowise"
                 ];
+
                 StateDirectory = "flowise";
                 StateDirectoryMode = "0750";
+                CacheDirectory = "flowise";
+
+                # Security hardening (optional, can comment out if issues)
+                # NoNewPrivileges = true;
+                # PrivateTmp = true;
               };
+
               wantedBy = [ "multi-user.target" ];
             };
 
