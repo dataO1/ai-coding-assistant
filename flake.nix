@@ -8,14 +8,46 @@
   outputs = { self, nixpkgs, ... }:
     let
       lib = nixpkgs.lib;
+      flowiseVersion = "3.0.8";
 
-      # Define Flowise version here (update this and run nix flake update)
-      # flowiseVersion = "2.1.3";  # ← Change this to update Flowise
-      flowiseVersion = "3.0.8";  # ← Change this to update Flowise
+      # Load Flowise config
+      flowiseConfigLib = import ./flowise-config/lib.nix;
+
+      loadFlowiseAgents = { models, urls }:
+        {
+          supervisor = import ./flowise-config/agents/supervisor.nix { inherit models urls; };
+          codeExpert = import ./flowise-config/agents/code-expert.nix { inherit models urls; };
+          knowledgeScout = import ./flowise-config/agents/knowledge-scout.nix { inherit models urls; };
+        };
+
+      generateFlowiseWorkflow = { models, urls }:
+        let
+          agents = loadFlowiseAgents { inherit models urls; };
+        in
+        import ./flowise-config/flows/main-workflow.nix {
+          inherit agents models urls lib;
+          lib = flowiseConfigLib;
+        };
 
       aiCodingAssistantModule = { config, pkgs, lib, ... }:
         let
           cfg = config.aiCodingAssistant;
+
+          # Generate Flowise workflow JSON with runtime config
+          flowiseModels = {
+            supervisor = cfg.supervisorAgentModel;
+            codeAgent = cfg.codeAgentModel;
+            codeThinking = cfg.codeThinkingAgentModel;
+            knowledge = cfg.knowledgeAgentModel;
+          };
+
+          flowiseUrls = {
+            ollama = "http://localhost:11434";
+            chromadb = "http://localhost:8000";
+          };
+
+          mainWorkflow = generateFlowiseWorkflow { models = flowiseModels; urls = flowiseUrls; };
+          workflowJson = builtins.toJSON mainWorkflow;
         in
         {
           options.aiCodingAssistant = {
@@ -34,7 +66,6 @@
           # Add assertion to validate password
             flowiseSecretKey = lib.mkOption {
               type = lib.types.str;
-              default = "";
               description = "Secret key for Flowise dashboard security.";
             };
             flowiseVersion = lib.mkOption {
@@ -101,6 +132,24 @@
 
             users.groups.flowise = {};
 
+            # Setup Flowise configs directly in home
+            system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "users" "groups" ] ''
+              FLOWISE_HOME="/var/lib/flowise"
+              FLOWS_DIR="$FLOWISE_HOME/flows"
+
+              # Create flows directory
+              ${pkgs.coreutils}/bin/install -d -m 750 -o flowise -g flowise "$FLOWS_DIR"
+
+              # Write main workflow JSON generated from Nix
+              ${pkgs.coreutils}/bin/install -d -m 750 -o flowise -g flowise "$FLOWS_DIR"
+              cat > "$FLOWS_DIR/main-workflow.json" << 'WORKFLOW'
+              ${workflowJson}
+              WORKFLOW
+              ${pkgs.coreutils}/bin/chown flowise:flowise "$FLOWS_DIR/main-workflow.json"
+              ${pkgs.coreutils}/bin/chmod 644 "$FLOWS_DIR/main-workflow.json"
+
+              echo "✅ Flowise workflow generated and installed"
+            '';
             environment.sessionVariables = {
               SUPERVISOR_AGENT_MODEL = cfg.supervisorAgentModel;
               CODE_AGENT_MODEL = cfg.codeAgentModel;
@@ -264,7 +313,7 @@
                     -e PORT=3000 \
                     -e FLOWISE_USERNAME=admin \
                     -e FLOWISE_PASSWORD=${cfg.flowisePassword} \
-                    -e FLOWISE_SECRETKEY_OVERWRITE=${if cfg.flowiseSecretKey == "" then "change_me_random_secret_key" else cfg.flowiseSecretKey} \
+                    -e FLOWISE_SECRETKEY_OVERWRITE=${cfg.flowiseSecretKey} \
                     -e DATABASE_TYPE=postgres \
                     -e DATABASE_HOST=127.0.0.1 \
                     -e DATABASE_PORT=5432 \

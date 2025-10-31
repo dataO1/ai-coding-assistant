@@ -1,0 +1,54 @@
+{
+  "nodes": [
+    {
+      "id": "chatInput_0",
+      "type": "chatInput",
+      "data": {
+        "label": "Chat Input",
+        "name": "chatInput"
+      },
+      "position": {
+        "x": 250,
+        "y": 50
+      }
+    },
+    {
+      "id": "supervisor_0",
+      "type": "agent",
+      "data": {
+        "label": "Supervisor (Router)",
+        "name": "supervisor",
+        "model": "${process.env.SUPERVISOR_AGENT_MODEL || 'qwen2.5-coder:7b'}",
+        "ollama_base_url": "${process.env.OLLAMA_BASE_URL || 'http://localhost:11434'}",
+        "systemPrompt": "You are a task router. Classify queries as:\n- CODE_TASK: Modify/generate code\n- LOOKUP_TASK: Research best practices\n- HYBRID_TASK: Both\n\nRespond with CodeExpert, KnowledgeScout, or HYBRID.",
+        "temperature": 0.0
+      },
+      "position": {
+        "x": 250,
+        "y": 200
+      }
+    },
+    {
+      "id": "chatOutput_0",
+      "type": "chatOutput",
+      "data": {
+        "label": "Chat Output",
+        "name": "chatOutput"
+      },
+      "position": {
+        "x": 250,
+        "y": 400
+      }
+    }
+  ],
+  "edges": [
+    {
+      "source": "chatInput_0",
+      "target": "supervisor_0"
+    },
+    {
+      "source": "supervisor_0",
+      "target": "chatOutput_0"
+    }
+  ]
+}
