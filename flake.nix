@@ -139,8 +139,12 @@
 
               serviceConfig = {
                 Type = "simple";
+
+                # Increase timeout for image pull (5 minutes should be enough)
+                TimeoutStartSec = "5min";
+
                 ExecStartPre = [
-                  # Pull specific version
+                  # Pull specific version with increased timeout
                   "${pkgs.docker}/bin/docker pull flowiseai/flowise:${cfg.flowiseVersion}"
                   # Clean up any existing container
                   "-${pkgs.docker}/bin/docker rm -f flowise"
@@ -169,7 +173,7 @@
                 '';
                 ExecStop = "${pkgs.docker}/bin/docker stop flowise";
                 Restart = "on-failure";
-                RestartSec = "10s";
+                RestartSec = "30s";
               };
 
               wantedBy = [ "multi-user.target" ];
