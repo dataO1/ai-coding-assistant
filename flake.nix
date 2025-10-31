@@ -56,15 +56,18 @@
 
         # Development shell
         devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            (pythonEnv pkgs)
-            python311Packages.black
-            python311Packages.pylint
-            python311Packages.pytest
-          ];
-        };
-      }
-    ) // {
+        buildinputs = with pkgs; [
+          python311
+          nodejs_22
+          git
+        ];
+
+        shellhook = ''
+          echo "install python deps with: pip install langchain langchain-community langchain-openai fastapi uvicorn pydantic langgraph"
+        '';
+      };
+    }) //
+    {
       # ========================================================================
       # NixOS Module (top-level exports)
       # ========================================================================
