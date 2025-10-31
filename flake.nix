@@ -65,6 +65,11 @@
               default = "qwen2.5-coder:70b";
               description = "Model for Knowledge Scout agent.";
             };
+            databasePassword = lib.mkOption {
+              type = lib.types.str;
+              default = "flowise_default_password";
+              description = "Password for Flowise PostgreSQL database user.";
+            };
           };
 
           config = lib.mkIf true {
@@ -105,13 +110,21 @@
               ];
             };
 
+            # Update PostgreSQL configuration
             services.postgresql = {
               enable = true;
               ensureDatabases = [ "flowise" ];
-              ensureUsers = [ {
+              ensureUsers = [{
                 name = "flowise";
                 ensureDBOwnership = true;
               }];
+
+              # Enable password authentication for localhost
+              authentication = lib.mkOverride 10 ''
+                local all all peer
+                host flowise flowise 127.0.0.1/32 scram-sha-256
+                host flowise flowise ::1/128 scram-sha-256
+              '';
             };
 
             services.chromadb = {
@@ -129,6 +142,12 @@
               enable = true;
               enableNvidia = cfg.gpuAcceleration;
             };
+
+            # Add activation script to set PostgreSQL password
+            system.activationScripts.setFlowisePassword = lib.stringAfter [ "users" ] ''
+              # Set password for flowise user
+              ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -c "ALTER USER flowise WITH PASSWORD '${cfg.databasePassword}';" || true
+            '';
 
             # Add this service before the flowise service
             systemd.services.flowise-image-pull = {
@@ -167,11 +186,11 @@
                     -e FLOWISE_PASSWORD=${cfg.flowisePassword} \
                     -e FLOWISE_SECRETKEY_OVERWRITE=${if cfg.flowiseSecretKey == "" then "change_me_random_secret_key" else cfg.flowiseSecretKey} \
                     -e DATABASE_TYPE=postgres \
-                    -e DATABASE_HOST=localhost \
+                    -e DATABASE_HOST=127.0.0.1 \
                     -e DATABASE_PORT=5432 \
                     -e DATABASE_NAME=flowise \
                     -e DATABASE_USER=flowise \
-                    -e DATABASE_PASSWORD= \
+                    -e DATABASE_PASSWORD=${cfg.databasePassword} \
                     -e OLLAMA_BASE_URL=http://localhost:11434 \
                     -e CHROMADB_URL=http://localhost:8000 \
                     -e SUPERVISOR_AGENT_MODEL=${cfg.supervisorAgentModel} \
@@ -180,7 +199,7 @@
                     -e KNOWLEDGE_AGENT_MODEL=${cfg.knowledgeAgentModel} \
                     -v flowise-data:/root/.flowise \
                     flowiseai/flowise:${cfg.flowiseVersion}
-                '';
+                    '';
                 ExecStop = "${pkgs.docker}/bin/docker stop flowise";
                 Restart = "on-failure";
                 RestartSec = "30s";
