@@ -166,8 +166,8 @@
 
             systemd.services.flowise-init = {
               description = "Initialize Flowise Admin Account";
-              after = [ "flowise.service" "postgresql.service" ];
-              requires = [ "flowise-image-pull.service" "postgresql.service" ];
+              after = [ "flowise.service" ];
+              requires = [ "flowise.service" ];
               wantedBy = [ "multi-user.target" ];
 
               serviceConfig = {
@@ -176,18 +176,21 @@
 
                 ExecStart = pkgs.writeShellScript "init-flowise" ''
                   # Wait for Flowise to be ready
-                  for i in {1..30}; do
+                  echo "Waiting for Flowise to start..."
+                  for i in {1..60}; do
                     if ${pkgs.curl}/bin/curl -s http://localhost:3000 >/dev/null 2>&1; then
                       echo "Flowise is ready, checking if setup is needed..."
 
-                      # Check if setup page is showing (indicates no account exists)
-                      RESPONSE=$(${pkgs.curl}/bin/curl -s http://localhost:3000/api/v1/verify)
+                      # Check if we can access API (account exists)
+                      VERIFY=$(${pkgs.curl}/bin/curl -s -u admin:${cfg.flowisePassword} http://localhost:3000/api/v1/verify)
 
-                      if echo "$RESPONSE" | grep -q "error\|unauthorized"; then
-                        echo "Creating admin account..."
+                      # If verify fails, account doesn't exist yet, create it
+                      if echo "$VERIFY" | grep -q "setup\|unauthorized"; then
+                        echo "No account found, creating admin account..."
 
-                        # Create account via API
-                        ${pkgs.curl}/bin/curl -X POST http://localhost:3000/api/v1/setup \
+                        # Create account via setup API with authentication
+                        RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST http://localhost:3000/api/v1/setup \
+                          -u admin:${cfg.flowisePassword} \
                           -H "Content-Type: application/json" \
                           -d '{
                             "existingUsername": "admin",
@@ -195,11 +198,16 @@
                             "username": "Admin",
                             "email": "admin@localhost",
                             "password": "${cfg.flowisePassword}"
-                          }'
+                          }')
 
-                        echo "Admin account created"
+                        if echo "$RESPONSE" | grep -q "success\|created\|Admin"; then
+                          echo "✅ Admin account created successfully"
+                        else
+                          echo "⚠️  Setup response: $RESPONSE"
+                          echo "You may need to complete setup manually at http://localhost:3000"
+                        fi
                       else
-                        echo "Account already exists, skipping setup"
+                        echo "✅ Account already exists, skipping setup"
                       fi
 
                       exit 0
@@ -207,8 +215,9 @@
                     sleep 2
                   done
 
-                  echo "Warning: Could not connect to Flowise for initialization"
-                  exit 0  # Don't fail, user can setup manually
+                  echo "⚠️  Could not connect to Flowise after 2 minutes"
+                  echo "Please setup account manually at http://localhost:3000"
+                  exit 0
                 '';
               };
             };
