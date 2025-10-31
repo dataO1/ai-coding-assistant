@@ -6,8 +6,8 @@ from enum import Enum
 from langchain.chat_models import ChatOllama
 from langchain.prompts import ChatPromptTemplate
 
-from ..utils import get_logger
-from ..mcp import get_mcp_registry
+from ai_agent_runtime.utils import get_logger
+from ai_agent_runtime.mcp import get_mcp_registry
 
 logger = get_logger(__name__)
 

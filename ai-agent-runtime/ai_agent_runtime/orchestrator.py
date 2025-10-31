@@ -6,14 +6,16 @@ from dataclasses import dataclass, field
 from langgraph.graph import StateGraph, START, END
 from langgraph.types import StateSnapshot
 
-from agents import (
+# ai-agent-runtime/ai_agent_runtime/orchestrator.py
+
+from ai_agent_runtime.agents import (
     AgentManifest,
     AgentOutput,
     SupervisorAgent,
     CodeExpertAgent,
     KnowledgeScoutAgent,
 )
-from utils import get_logger
+from ai_agent_runtime.utils import get_logger
 
 logger = get_logger(__name__)
 

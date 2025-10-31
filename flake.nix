@@ -33,17 +33,18 @@
           buildInputs = [ (pythonEnv pkgs) ];
 
           installPhase = ''
-            mkdir -p $out/lib/ai-agent
+            mkdir -p $out/lib
             mkdir -p $out/bin
 
-            # Copy all runtime code
-            cp -r . $out/lib/ai-agent/
+            # Copy entire ai-agent-runtime as a package
+            cp -r . $out/lib/ai-agent-runtime
 
-            # Create launcher script with HARD-CODED path (not using $out variable)
+            # Create launcher script
             cat > $out/bin/ai-agent-server << EOF
             #!/usr/bin/env bash
-            export PYTHONPATH="$out/lib/ai-agent:\$PYTHONPATH"
-            exec ${(pythonEnv pkgs)}/bin/python "$out/lib/ai-agent/server.py" "\$@"
+            export PYTHONPATH="$out/lib:\$PYTHONPATH"
+            cd "$out/lib/ai-agent-runtime"
+            exec ${(pythonEnv pkgs)}/bin/python -m ai_agent_runtime.server "\$@"
             EOF
             chmod +x $out/bin/ai-agent-server
           '';

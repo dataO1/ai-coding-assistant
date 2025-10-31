@@ -1,4 +1,4 @@
-# ai-agent-runtime/server.py
+# ai-agent-runtime/ai_agent_runtime/server.py
 
 import os
 import json
@@ -11,11 +11,11 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import uvicorn
 
-from orchestrator import MultiAgentOrchestrator
+# Use absolute imports instead of relative
+from ai_agent_runtime.orchestrator import MultiAgentOrchestrator
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 # ============================================================================
 # Configuration - FROM ENVIRONMENT (set by systemd)
 # ============================================================================
@@ -90,6 +90,3 @@ async def chat_completions(request: dict):
         "object": "chat.completion",
         "choices": [{"message": {"role": "assistant", "content": result["response"]}}],
     }
-
-if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT)
