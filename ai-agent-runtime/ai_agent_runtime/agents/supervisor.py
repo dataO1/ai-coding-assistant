@@ -4,9 +4,9 @@ from typing import Dict, Any, List
 from langchain.prompts import ChatPromptTemplate
 
 from .base import BaseAgent, AgentOutput, AgentManifest
+from ai_agent_runtime.utils import get_logger
 
-logger_module = __import__('..utils', fromlist=['get_logger'])
-logger = logger_module.get_logger(__name__)
+logger = get_logger(__name__)
 
 class SupervisorAgent(BaseAgent):
     """

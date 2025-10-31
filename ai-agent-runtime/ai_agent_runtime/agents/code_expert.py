@@ -2,9 +2,9 @@ import asyncio
 from typing import Dict, Any
 
 from .base import BaseAgent, AgentOutput
+from ai_agent_runtime.utils import get_logger
 
-logger_module = __import__('..utils', fromlist=['get_logger'])
-logger = logger_module.get_logger(__name__)
+logger = get_logger(__name__)
 
 class CodeExpertAgent(BaseAgent):
     """
