@@ -65,24 +65,17 @@
                 home = "/var/lib/flowise";
                 group = "flowise";
               };
-              chromadb = {
-                isSystemUser = true;
-                home = "/var/lib/chromadb";
-                group = "chromadb";
-              };
             };
 
             users.groups = {
               flowise = {};
-              chromadb = {};
             };
 
-            # Fixed: Use host and port instead of listenAddress
             services.ollama = {
               enable = true;
               acceleration = if cfg.gpuAcceleration then "cuda" else null;
-              host = "0.0.0.0";  # ← Changed from listenAddress
-              port = 11434;     # ← Split into separate option
+              host = "0.0.0.0";
+              port = 11434;
               environmentVariables = {
                 OLLAMA_NUM_PARALLEL = "4";
                 OLLAMA_MAX_LOADED_MODELS = "3";
@@ -98,40 +91,29 @@
               }];
             };
 
-            # Fixed: Enable 32-bit support libraries for NVIDIA
+            # Native ChromaDB service instead of Docker
+            services.chromadb = {
+              enable = true;
+              host = "127.0.0.1";
+              port = 8000;
+            };
+
+            # Only enable Docker and 32-bit graphics if GPU acceleration is enabled
             hardware.graphics = lib.mkIf cfg.gpuAcceleration {
               enable = true;
-              enable32Bit = true;  # ← Required for enableNvidia
+              enable32Bit = true;
             };
 
-            virtualisation.docker = {
+            virtualisation.docker = lib.mkIf cfg.gpuAcceleration {
               enable = true;
-              enableNvidia = cfg.gpuAcceleration;
-            };
-
-            systemd.services.chromadb = {
-              description = "Chroma Vector Database";
-              after = [ "network-online.target" "docker.service" ];
-              wants = [ "network-online.target" ];
-              requires = [ "docker.service" ];
-              serviceConfig = {
-                Type = "simple";
-                User = "chromadb";
-                Group = "chromadb";
-                ExecStart = "${pkgs.docker}/bin/docker run --rm --name chromadb --network=host chromadb/chroma:latest";
-                ExecStop = "${pkgs.docker}/bin/docker stop chromadb";
-                Restart = "on-failure";
-                StateDirectory = "chromadb";
-                StateDirectoryMode = "0750";
-              };
-              wantedBy = [ "multi-user.target" ];
+              enableNvidia = true;
             };
 
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder";
-              after = [ "network-online.target" "postgresql.service" ];
+              after = [ "network-online.target" "postgresql.service" "chromadb.service" ];
               wants = [ "network-online.target" ];
-              requires = [ "postgresql.service" ];
+              requires = [ "postgresql.service" "chromadb.service" ];
               serviceConfig = {
                 Type = "simple";
                 User = "flowise";
@@ -169,9 +151,10 @@
               gh
               git-lfs
               ollama
-              docker
               direnv
               btop
+            ] ++ lib.optionals cfg.gpuAcceleration [
+              docker
               nvtopPackages.full
             ];
 
