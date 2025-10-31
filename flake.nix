@@ -137,44 +137,6 @@
 
             users.groups.flowise = {};
 
-            # Setup Flowise configs directly in home
-            system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "users" "groups" ] ''
-              FLOWISE_HOME="/var/lib/flowise"
-              FLOWS_DIR="$FLOWISE_HOME/flows"
-              CONFIG_SOURCE="${self}/flowise-config"
-              API_KEY_FILE="/var/lib/flowise/.flowise-api-key"
-
-              echo "Setting up Flowise configuration..."
-
-              ${pkgs.coreutils}/bin/install -d -m 750 -o flowise -g flowise "$FLOWS_DIR"
-
-              # Copy JSON files
-              if [ -d "$CONFIG_SOURCE" ]; then
-                ${pkgs.findutils}/bin/find "$CONFIG_SOURCE" -maxdepth 1 -name '*.json' -exec \
-                  ${pkgs.coreutils}/bin/install -m 644 -o flowise -g flowise {} "$FLOWS_DIR/" \;
-                echo "✅ Workflow JSON files copied"
-              fi
-
-              # Generate API key directly in database if it doesn't exist
-              if [ ! -f "$API_KEY_FILE" ]; then
-                echo "Generating API key in database..."
-
-                # Generate a random API key
-                API_KEY=$(${pkgs.openssl}/bin/openssl rand -hex 32)
-
-                # Insert into database
-                ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
-                  INSERT INTO api_key (apiKey, "keyName", "createdDate")
-                  VALUES ('$API_KEY', 'system-init', NOW())
-                  ON CONFLICT DO NOTHING;
-            SQL
-
-                echo "$API_KEY" > "$API_KEY_FILE"
-                chmod 600 "$API_KEY_FILE"
-                chown flowise:flowise "$API_KEY_FILE"
-                echo "✅ API key created: $API_KEY_FILE"
-              fi
-            '';
             environment.sessionVariables = {
               SUPERVISOR_AGENT_MODEL = cfg.supervisorAgentModel;
               CODE_AGENT_MODEL = cfg.codeAgentModel;
@@ -258,93 +220,101 @@
               };
             };
 
-            systemd.services.flowise-init = {
-              description = "Initialize Flowise Admin Account and Import Workflows";
-              after = [ "flowise.service" ];
-              requires = [ "flowise.service" ];
-              wantedBy = [ "multi-user.target" ];
+systemd.services.flowise-init = {
+  description = "Initialize Flowise Admin Account and Import Workflows";
+  after = [ "flowise.service" ];
+  requires = [ "flowise.service" ];
+  wantedBy = [ "multi-user.target" ];
 
-              serviceConfig = {
-                Type = "oneshot";
-                RemainAfterExit = true;
+  serviceConfig = {
+    Type = "oneshot";
+    RemainAfterExit = true;
 
-                ExecStart = pkgs.writeShellScript "init-flowise" ''
-                  FLOWISE_URL="http://localhost:3000"
-                  FLOWISE_ADMIN_USER="admin"
-                  FLOWISE_ADMIN_PASS="${cfg.flowisePassword}"
-                  FLOWISE_EMAIL="${cfg.flowiseEmail}"
-                  FLOWS_DIR="/var/lib/flowise/flows"
-                  API_KEY_FILE="/var/lib/flowise/.flowise-api-key"
+    ExecStart = pkgs.writeShellScript "init-flowise" ''
+      FLOWISE_URL="http://localhost:3000"
+      FLOWISE_ADMIN_USER="admin"
+      FLOWISE_ADMIN_PASS="${cfg.flowisePassword}"
+      FLOWISE_EMAIL="${cfg.flowiseEmail}"
 
-                  echo "Waiting for Flowise to start..."
-                  for i in {1..60}; do
-                    if ${pkgs.curl}/bin/curl -s "$FLOWISE_URL" >/dev/null 2>&1; then
-                      echo "✅ Flowise is ready"
-                      break
-                    fi
-                    sleep 2
-                  done
+      echo "Waiting for Flowise to start..."
+      for i in {1..60}; do
+        if ${pkgs.curl}/bin/curl -s "$FLOWISE_URL" >/dev/null 2>&1; then
+          echo "✅ Flowise is ready"
+          break
+        fi
+        sleep 2
+      done
 
-                  # Setup admin account if needed
-                  echo "Checking if admin account exists..."
-                  VERIFY=$(${pkgs.curl}/bin/curl -s -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" "$FLOWISE_URL/api/v1/verify")
+      # Setup admin account if needed via API endpoint: POST /api/v1/setup
+      echo "Checking if admin account exists..."
+      VERIFY=$(${pkgs.curl}/bin/curl -s -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
+        "$FLOWISE_URL/api/v1/verify" 2>/dev/null || echo '{"error":"failed"}')
 
-                  if echo "$VERIFY" | grep -q "Unauthorized"; then
-                    echo "Creating admin account..."
-                    ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
-                      -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
-                      -H "Content-Type: application/json" \
-                      -d "{
-                        \"existingUsername\": \"admin\",
-                        \"existingPassword\": \"$FLOWISE_ADMIN_PASS\",
-                        \"username\": \"Admin\",
-                        \"email\": \"$FLOWISE_EMAIL\",
-                        \"password\": \"$FLOWISE_ADMIN_PASS\"
-                      }" >/dev/null
-                    echo "✅ Admin account created"
-                    sleep 2
-                  else
-                    echo "✅ Admin account already exists"
-                  fi
+      if echo "$VERIFY" | grep -q "error\|Unauthorized"; then
+        echo "Creating admin account via /api/v1/setup..."
+        ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
+          -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
+          -H "Content-Type: application/json" \
+          -d "{
+            \"existingUsername\": \"admin\",
+            \"existingPassword\": \"$FLOWISE_ADMIN_PASS\",
+            \"username\": \"Admin\",
+            \"email\": \"$FLOWISE_EMAIL\",
+            \"password\": \"$FLOWISE_ADMIN_PASS\"
+          }" >/dev/null 2>&1
+        echo "✅ Admin account created"
+        sleep 2
+      else
+        echo "✅ Admin account already exists"
+      fi
 
-                  # Import workflows using stored API key
-                  if [ -f "$API_KEY_FILE" ]; then
-                    API_KEY=$(cat "$API_KEY_FILE")
-                    echo "Importing workflows using API key..."
+      echo "✅ Flowise initialization complete"
+    '';
+  };
+};
 
-                    if [ -d "$FLOWS_DIR" ]; then
-                      for json_file in "$FLOWS_DIR"/*.json; do
-                        if [ -f "$json_file" ]; then
-                          filename=$(basename "$json_file")
-                          echo "Importing $filename..."
+# Use database insertion for flows (no public API endpoint exists)
+system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "users" "groups" "postgresql" ] ''
+  FLOWISE_HOME="/var/lib/flowise"
+  FLOWS_DIR="$FLOWISE_HOME/flows"
+  CONFIG_SOURCE="${self}/flowise-config"
 
-                          RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/flows" \
-                            -H "Authorization: Bearer $API_KEY" \
-                            -H "Content-Type: application/json" \
-                            -d @"$json_file")
+  echo "Setting up Flowise workflow configurations..."
 
-                          if echo "$RESPONSE" | ${pkgs.jq}/bin/jq . >/dev/null 2>&1; then
-                            ID=$(echo "$RESPONSE" | ${pkgs.jq}/bin/jq -r '.id // empty')
-                            if [ -n "$ID" ]; then
-                              echo "✅ Imported: $filename (ID: $ID)"
-                            else
-                              echo "⚠️  Import response unclear for $filename: $RESPONSE"
-                            fi
-                          else
-                            echo "⚠️  Failed to import $filename"
-                          fi
-                        fi
-                      done
-                      echo "✅ Workflow import complete"
-                    fi
-                  else
-                    echo "⚠️  API key file not found"
-                  fi
+  # Create flows directory
+  ${pkgs.coreutils}/bin/install -d -m 750 -o flowise -g flowise "$FLOWS_DIR"
 
-                  echo "✅ Flowise initialization complete"
-                '';
-              };
-            };
+  # Copy JSON files
+  if [ -d "$CONFIG_SOURCE" ]; then
+    ${pkgs.findutils}/bin/find "$CONFIG_SOURCE" -maxdepth 1 -name '*.json' -exec \
+      ${pkgs.coreutils}/bin/install -m 644 -o flowise -g flowise {} "$FLOWS_DIR/" \;
+    echo "✅ Workflow JSON files copied"
+  fi
+
+  # Import workflows via database (no public API for this)
+  echo "Importing workflows into database (via native Flowise method)..."
+
+  for json_file in "$FLOWS_DIR"/*.json; do
+    if [ -f "$json_file" ]; then
+      FLOW_NAME=$(basename "''${json_file%.json}")
+      FLOW_DATA=$(${pkgs.jq}/bin/jq -c . "$json_file")
+
+      # Escape single quotes for SQL
+      FLOW_DATA_ESCAPED=$(echo "$FLOW_DATA" | sed "s/'/''/g")
+
+      # Insert into database
+      ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
+        INSERT INTO chat_flow (name, "flowData", "createdDate", "updatedDate")
+        VALUES ('$FLOW_NAME', '$FLOW_DATA_ESCAPED', NOW(), NOW())
+        ON CONFLICT (name) DO UPDATE SET
+          "flowData" = EXCLUDED."flowData",
+          "updatedDate" = NOW();
+      SQL
+
+      echo "✅ Imported: $FLOW_NAME"
+    fi
+  done
+'';
 
             # Flowise Docker service with pinned version
             systemd.services.flowise = {
