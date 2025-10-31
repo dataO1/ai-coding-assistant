@@ -39,11 +39,11 @@
             # Copy all runtime code
             cp -r . $out/lib/ai-agent/
 
-            # Create launcher script
-            cat > $out/bin/ai-agent-server << 'EOF'
+            # Create launcher script with HARD-CODED path (not using $out variable)
+            cat > $out/bin/ai-agent-server << EOF
             #!/usr/bin/env bash
-            export PYTHONPATH="$out/lib/ai-agent:$PYTHONPATH"
-            exec ${(pythonEnv pkgs)}/bin/python "$out/lib/ai-agent/server.py" "$@"
+            export PYTHONPATH="$out/lib/ai-agent:\$PYTHONPATH"
+            exec ${(pythonEnv pkgs)}/bin/python "$out/lib/ai-agent/server.py" "\$@"
             EOF
             chmod +x $out/bin/ai-agent-server
           '';
