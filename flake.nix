@@ -10,7 +10,8 @@
       lib = nixpkgs.lib;
 
       # Define Flowise version here (update this and run nix flake update)
-      flowiseVersion = "2.1.3";  # ← Change this to update Flowise
+      # flowiseVersion = "2.1.3";  # ← Change this to update Flowise
+      flowiseVersion = "3.0.8";  # ← Change this to update Flowise
 
       aiCodingAssistantModule = { config, pkgs, lib, ... }:
         let
