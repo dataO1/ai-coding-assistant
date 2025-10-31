@@ -13,7 +13,7 @@
         lib = pkgs.lib;
       in
       {
-        nixosModules.aiCodingAssistant = { config, pkgs, lib, ... }:
+        nixosModules.default = { config, pkgs, lib, ... }:
           let
             cfg = config.aiCodingAssistant;
           in
