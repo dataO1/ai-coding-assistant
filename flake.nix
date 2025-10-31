@@ -172,7 +172,7 @@
               docker
               direnv
               btop
-              nvtop
+              nvtopPackages.full
             ];
 
             fileSystems = lib.listToAttrs (lib.imap0 (i: path: {
