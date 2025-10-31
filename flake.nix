@@ -136,19 +136,39 @@
             system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "users" "groups" ] ''
               FLOWISE_HOME="/var/lib/flowise"
               FLOWS_DIR="$FLOWISE_HOME/flows"
+              CONFIG_SOURCE="${self}/flowise-config"
+              API_KEY_FILE="/var/lib/flowise/.flowise-api-key"
 
-              # Create flows directory
+              echo "Setting up Flowise configuration..."
+
               ${pkgs.coreutils}/bin/install -d -m 750 -o flowise -g flowise "$FLOWS_DIR"
 
-              # Write main workflow JSON generated from Nix
-              ${pkgs.coreutils}/bin/install -d -m 750 -o flowise -g flowise "$FLOWS_DIR"
-              cat > "$FLOWS_DIR/main-workflow.json" << 'WORKFLOW'
-              ${workflowJson}
-              WORKFLOW
-              ${pkgs.coreutils}/bin/chown flowise:flowise "$FLOWS_DIR/main-workflow.json"
-              ${pkgs.coreutils}/bin/chmod 644 "$FLOWS_DIR/main-workflow.json"
+              # Copy JSON files
+              if [ -d "$CONFIG_SOURCE" ]; then
+                ${pkgs.findutils}/bin/find "$CONFIG_SOURCE" -maxdepth 1 -name '*.json' -exec \
+                  ${pkgs.coreutils}/bin/install -m 644 -o flowise -g flowise {} "$FLOWS_DIR/" \;
+                echo "✅ Workflow JSON files copied"
+              fi
 
-              echo "✅ Flowise workflow generated and installed"
+              # Generate API key directly in database if it doesn't exist
+              if [ ! -f "$API_KEY_FILE" ]; then
+                echo "Generating API key in database..."
+
+                # Generate a random API key
+                API_KEY=$(${pkgs.openssl}/bin/openssl rand -hex 32)
+
+                # Insert into database
+                ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
+                  INSERT INTO api_key (apiKey, "keyName", "createdDate")
+                  VALUES ('$API_KEY', 'system-init', NOW())
+                  ON CONFLICT DO NOTHING;
+            SQL
+
+                echo "$API_KEY" > "$API_KEY_FILE"
+                chmod 600 "$API_KEY_FILE"
+                chown flowise:flowise "$API_KEY_FILE"
+                echo "✅ API key created: $API_KEY_FILE"
+              fi
             '';
             environment.sessionVariables = {
               SUPERVISOR_AGENT_MODEL = cfg.supervisorAgentModel;
@@ -282,71 +302,38 @@
                     echo "✅ Admin account already exists"
                   fi
 
-                  # Generate API key if not exists
-                  if [ ! -f "$API_KEY_FILE" ]; then
-                    echo "Generating API key..."
-
-                    # Get auth token via setup endpoint
-                    TOKEN=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
-                      -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
-                      -H "Content-Type: application/json" \
-                      -d "{
-                        \"existingUsername\": \"admin\",
-                        \"existingPassword\": \"$FLOWISE_ADMIN_PASS\",
-                        \"username\": \"Admin\",
-                        \"email\": \"$FLOWISE_EMAIL\",
-                        \"password\": \"$FLOWISE_ADMIN_PASS\"
-                      }" | ${pkgs.jq}/bin/jq -r '.token // empty')
-
-                    if [ -z "$TOKEN" ]; then
-                      echo "⚠️  Could not get auth token, skipping API key generation"
-                    else
-                      # Create API key
-                      API_KEY=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/apikey" \
-                        -H "Authorization: Bearer $TOKEN" \
-                        -H "Content-Type: application/json" \
-                        -d '{"keyName": "system-init"}' | ${pkgs.jq}/bin/jq -r '.apiKey // empty')
-
-                      if [ -n "$API_KEY" ]; then
-                        echo "$API_KEY" > "$API_KEY_FILE"
-                        chmod 600 "$API_KEY_FILE"
-                        chown flowise:flowise "$API_KEY_FILE"
-                        echo "✅ API key generated and saved"
-                      fi
-                    fi
-                  else
-                    echo "✅ API key already exists"
-                  fi
-
-                  # Import workflow JSON files
-                  if [ -d "$FLOWS_DIR" ] && [ -f "$API_KEY_FILE" ]; then
+                  # Import workflows using stored API key
+                  if [ -f "$API_KEY_FILE" ]; then
                     API_KEY=$(cat "$API_KEY_FILE")
                     echo "Importing workflows using API key..."
 
-                    for json_file in "$FLOWS_DIR"/*.json; do
-                      if [ -f "$json_file" ]; then
-                        filename=$(basename "$json_file")
-                        echo "Importing $filename..."
+                    if [ -d "$FLOWS_DIR" ]; then
+                      for json_file in "$FLOWS_DIR"/*.json; do
+                        if [ -f "$json_file" ]; then
+                          filename=$(basename "$json_file")
+                          echo "Importing $filename..."
 
-                        RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/flows" \
-                          -H "Authorization: Bearer $API_KEY" \
-                          -H "Content-Type: application/json" \
-                          -d @"$json_file")
+                          RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/flows" \
+                            -H "Authorization: Bearer $API_KEY" \
+                            -H "Content-Type: application/json" \
+                            -d @"$json_file")
 
-                        if echo "$RESPONSE" | ${pkgs.jq}/bin/jq . >/dev/null 2>&1; then
-                          ID=$(echo "$RESPONSE" | ${pkgs.jq}/bin/jq -r '.id // empty')
-                          if [ -n "$ID" ]; then
-                            echo "✅ Imported: $filename (ID: $ID)"
+                          if echo "$RESPONSE" | ${pkgs.jq}/bin/jq . >/dev/null 2>&1; then
+                            ID=$(echo "$RESPONSE" | ${pkgs.jq}/bin/jq -r '.id // empty')
+                            if [ -n "$ID" ]; then
+                              echo "✅ Imported: $filename (ID: $ID)"
+                            else
+                              echo "⚠️  Import response unclear for $filename: $RESPONSE"
+                            fi
                           else
-                            echo "⚠️  Import response unclear for $filename"
+                            echo "⚠️  Failed to import $filename"
                           fi
-                        else
-                          echo "⚠️  Failed to import $filename"
                         fi
-                      fi
-                    done
+                      done
+                      echo "✅ Workflow import complete"
+                    fi
                   else
-                    echo "⚠️  API key or flows directory not found, skipping import"
+                    echo "⚠️  API key file not found"
                   fi
 
                   echo "✅ Flowise initialization complete"
