@@ -205,7 +205,7 @@
                       VERIFY=$(${pkgs.curl}/bin/curl -s -u admin:${cfg.flowisePassword} http://localhost:3000/api/v1/verify)
 
                       # If verify fails, account doesn't exist yet, create it
-                      if echo "$VERIFY" | grep -q "setup\|unauthorized"; then
+                      if echo "$VERIFY" | grep "Unauthorized"; then
                         echo "No account found, creating admin account..."
 
                         # Create account via setup API with authentication
