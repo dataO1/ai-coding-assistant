@@ -168,20 +168,22 @@
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
               after = [ "flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              wants = [ "network-online.target" ];
               requires = [ "flowise-image-pull.service" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
               serviceConfig = {
                 Type = "simple";
-                TimeoutStartSec = "2min";  # Can be shorter now
+                TimeoutStartSec = "2min";
 
                 ExecStartPre = [
-                  # No pull needed, just cleanup
                   "-${pkgs.docker}/bin/docker rm -f flowise"
                 ];
+
                 ExecStart = pkgs.writeShellScript "start-flowise" ''
                   ${pkgs.docker}/bin/docker run --rm \
                     --name flowise \
                     --network host \
+                    -e PORT=3000 \
                     -e FLOWISE_USERNAME=admin \
                     -e FLOWISE_PASSWORD=${cfg.flowisePassword} \
                     -e FLOWISE_SECRETKEY_OVERWRITE=${if cfg.flowiseSecretKey == "" then "change_me_random_secret_key" else cfg.flowiseSecretKey} \
@@ -191,6 +193,11 @@
                     -e DATABASE_NAME=flowise \
                     -e DATABASE_USER=flowise \
                     -e DATABASE_PASSWORD=${cfg.databasePassword} \
+                    -e APIKEY_PATH=/root/.flowise \
+                    -e SECRETKEY_PATH=/root/.flowise \
+                    -e LOG_PATH=/root/.flowise/logs \
+                    -e BLOB_STORAGE_PATH=/root/.flowise/storage \
+                    -e DISABLE_FLOWISE_TELEMETRY=true \
                     -e OLLAMA_BASE_URL=http://localhost:11434 \
                     -e CHROMADB_URL=http://localhost:8000 \
                     -e SUPERVISOR_AGENT_MODEL=${cfg.supervisorAgentModel} \
@@ -199,7 +206,8 @@
                     -e KNOWLEDGE_AGENT_MODEL=${cfg.knowledgeAgentModel} \
                     -v flowise-data:/root/.flowise \
                     flowiseai/flowise:${cfg.flowiseVersion}
-                    '';
+                '';
+
                 ExecStop = "${pkgs.docker}/bin/docker stop flowise";
                 Restart = "on-failure";
                 RestartSec = "30s";
