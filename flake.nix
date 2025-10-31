@@ -234,7 +234,7 @@
             };
 
             systemd.services.flowise-init = {
-              description = "Initialize Flowise Admin Account";
+              description = "Initialize Flowise Admin Account and Import Workflows";
               after = [ "flowise.service" ];
               requires = [ "flowise.service" ];
               wantedBy = [ "multi-user.target" ];
@@ -244,49 +244,78 @@
                 RemainAfterExit = true;
 
                 ExecStart = pkgs.writeShellScript "init-flowise" ''
-                  # Wait for Flowise to be ready
+                  FLOWISE_URL="http://localhost:3000"
+                  FLOWISE_USER="admin"
+                  FLOWISE_PASS="${cfg.flowisePassword}"
+                  FLOWS_DIR="/var/lib/flowise/flows"
+
                   echo "Waiting for Flowise to start..."
                   for i in {1..60}; do
-                    if ${pkgs.curl}/bin/curl -s http://localhost:3000 >/dev/null 2>&1; then
-                      echo "Flowise is ready, checking if setup is needed..."
-
-                      # Check if we can access API (account exists)
-                      VERIFY=$(${pkgs.curl}/bin/curl -s -u admin:${cfg.flowisePassword} http://localhost:3000/api/v1/verify)
-
-                      # If verify fails, account doesn't exist yet, create it
-                      if echo "$VERIFY" | grep "Unauthorized"; then
-                        echo "No account found, creating admin account..."
-
-                        # Create account via setup API with authentication
-                        RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST http://localhost:3000/api/v1/setup \
-                          -u admin:${cfg.flowisePassword} \
-                          -H "Content-Type: application/json" \
-                          -d '{
-                            "existingUsername": "admin",
-                            "existingPassword": "${cfg.flowisePassword}",
-                            "username": "Admin",
-                            "email": "admin@localhost",
-                            "password": "${cfg.flowisePassword}"
-                          }')
-
-                        if echo "$RESPONSE" | grep -q "success\|created\|Admin"; then
-                          echo "✅ Admin account created successfully"
-                        else
-                          echo "⚠️  Setup response: $RESPONSE"
-                          echo "You may need to complete setup manually at http://localhost:3000"
-                        fi
-                      else
-                        echo "✅ Account already exists, skipping setup"
-                      fi
-
-                      exit 0
+                    if ${pkgs.curl}/bin/curl -s "$FLOWISE_URL" >/dev/null 2>&1; then
+                      echo "Flowise is ready"
+                      break
                     fi
                     sleep 2
                   done
 
-                  echo "⚠️  Could not connect to Flowise after 2 minutes"
-                  echo "Please setup account manually at http://localhost:3000"
-                  exit 0
+                  # Setup admin account if needed
+                  echo "Checking if admin account exists..."
+                  VERIFY=$(${pkgs.curl}/bin/curl -s -u admin:${cfg.flowisePassword} "$FLOWISE_URL/api/v1/verify")
+
+                  if echo "$VERIFY" | grep "Unauthorized"; then
+                    echo "Creating admin account..."
+                    ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
+                      -u admin:${cfg.flowisePassword} \
+                      -H "Content-Type: application/json" \
+                      -d '{
+                        "existingUsername": "admin",
+                        "existingPassword": "${cfg.flowisePassword}",
+                        "username": "Admin",
+                        "email": "admin@localhost",
+                        "password": "${cfg.flowisePassword}"
+                      }' >/dev/null
+                    echo "✅ Admin account created"
+                  else
+                    echo "✅ Admin account already exists"
+                  fi
+
+                  # Get auth token
+                  echo "Authenticating with Flowise..."
+                  AUTH_RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/auth/login" \
+                    -H "Content-Type: application/json" \
+                    -d "{
+                      \"username\": \"admin@localhost\",
+                      \"password\": \"${cfg.flowisePassword}\"
+                    }")
+
+                  TOKEN=$(echo "$AUTH_RESPONSE" | ${pkgs.jq}/bin/jq -r '.token // empty')
+
+                  if [ -z "$TOKEN" ]; then
+                    echo "⚠️  Could not authenticate with Flowise"
+                    exit 0
+                  fi
+
+                  echo "✅ Authentication successful"
+
+                  # Import workflow JSON files
+                  if [ -d "$FLOWS_DIR" ]; then
+                    echo "Importing workflows from $FLOWS_DIR..."
+
+                    for json_file in "$FLOWS_DIR"/*.json; do
+                      if [ -f "$json_file" ]; then
+                        filename=$(basename "$json_file")
+                        echo "Importing $filename..."
+
+                        # Import via API
+                        ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/flows" \
+                          -H "Authorization: Bearer $TOKEN" \
+                          -H "Content-Type: application/json" \
+                          -d @"$json_file" >/dev/null 2>&1 || true
+                      fi
+                    done
+
+                    echo "✅ Workflows imported"
+                  fi
                 '';
               };
             };
