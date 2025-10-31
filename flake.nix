@@ -1,5 +1,5 @@
 {
-  description = "AI Coding Assistant Host Configuration with Model Options";
+  description = "AI Coding Assistant Host Configuration";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -8,59 +8,54 @@
   outputs = { self, nixpkgs, ... }:
     let
       lib = nixpkgs.lib;
-    in
-    {
-      # NixOS module must be at TOP LEVEL, not per-system
-      nixosModules.ai-coding-assistant = { config, pkgs, lib, ... }:
+
+      # Define the module once
+      aiCodingAssistantModule = { config, pkgs, lib, ... }:
         let
           cfg = config.aiCodingAssistant;
         in
         {
-          options = {
-            aiCodingAssistant = {
-              gpuAcceleration = lib.mkOption {
-                type = lib.types.bool;
-                default = true;
-                description = "Enable GPU acceleration for Ollama.";
-              };
-              flowisePassword = lib.mkOption {
-                type = lib.types.str;
-                default = "changeme";
-                description = "Password for Flowise dashboard login.";
-              };
-              flowiseSecretKey = lib.mkOption {
-                type = lib.types.str;
-                default = "";
-                description = "Secret key for Flowise dashboard security.";
-              };
-              projectsFileSystemPaths = lib.mkOption {
-                type = lib.types.listOf lib.types.str;
-                default = [];
-                example = [ "/home/user/projects" ];
-                description = "List of directories exposed via bind mount to MCP tools.";
-              };
-
-              # Model mapping options
-              supervisorAgentModel = lib.mkOption {
-                type = lib.types.str;
-                default = "qwen2.5-coder:7b";
-                description = "Model name for the Supervisor (Router) agent.";
-              };
-              codeAgentModel = lib.mkOption {
-                type = lib.types.str;
-                default = "qwen2.5-coder:14b";
-                description = "Model name for the Code Expert agent (fast path).";
-              };
-              codeThinkingAgentModel = lib.mkOption {
-                type = lib.types.str;
-                default = "deepseek-coder:33b";
-                description = "Model name for the Code Thinking agent (complex refactoring).";
-              };
-              knowledgeAgentModel = lib.mkOption {
-                type = lib.types.str;
-                default = "qwen2.5-coder:70b";
-                description = "Model name for the Knowledge Scout agent (research and synthesis).";
-              };
+          options.aiCodingAssistant = {
+            gpuAcceleration = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+              description = "Enable GPU acceleration for Ollama.";
+            };
+            flowisePassword = lib.mkOption {
+              type = lib.types.str;
+              default = "changeme";
+              description = "Password for Flowise dashboard login.";
+            };
+            flowiseSecretKey = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = "Secret key for Flowise dashboard security.";
+            };
+            projectsFileSystemPaths = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [];
+              example = [ "/home/user/projects" ];
+              description = "List of directories exposed via bind mount to MCP tools.";
+            };
+            supervisorAgentModel = lib.mkOption {
+              type = lib.types.str;
+              default = "qwen2.5-coder:7b";
+              description = "Model for Supervisor (Router) agent.";
+            };
+            codeAgentModel = lib.mkOption {
+              type = lib.types.str;
+              default = "qwen2.5-coder:14b";
+              description = "Model for Code Expert agent.";
+            };
+            codeThinkingAgentModel = lib.mkOption {
+              type = lib.types.str;
+              default = "deepseek-coder:33b";
+              description = "Model for Code Thinking agent.";
+            };
+            knowledgeAgentModel = lib.mkOption {
+              type = lib.types.str;
+              default = "qwen2.5-coder:70b";
+              description = "Model for Knowledge Scout agent.";
             };
           };
 
@@ -148,7 +143,6 @@
                   "DATABASE_USER=flowise"
                   "OLLAMA_BASE_URL=http://localhost:11434"
                   "CHROMADB_URL=http://localhost:8000"
-                  # Model assignments for agents
                   "SUPERVISOR_AGENT_MODEL=${cfg.supervisorAgentModel}"
                   "CODE_AGENT_MODEL=${cfg.codeAgentModel}"
                   "CODE_THINKING_AGENT_MODEL=${cfg.codeThinkingAgentModel}"
@@ -174,7 +168,6 @@
               nvtop
             ];
 
-            # Dynamic bind mounts for project directories
             fileSystems = lib.listToAttrs (lib.imap0 (i: path: {
               name = "/mnt/agent-workspace-${toString i}";
               value = {
@@ -185,5 +178,12 @@
             }) cfg.projectsFileSystemPaths);
           };
         };
+    in
+    {
+      # Export as default (simplest)
+      nixosModules.default = aiCodingAssistantModule;
+
+      # Also export with explicit name (optional, for clarity)
+      nixosModules.ai-coding-assistant = aiCodingAssistantModule;
     };
 }
