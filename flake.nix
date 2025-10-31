@@ -71,6 +71,17 @@
               flowise = {};
             };
 
+            # Make environment variables globally available
+            environment.sessionVariables = {
+              SUPERVISOR_AGENT_MODEL = cfg.supervisorAgentModel;
+              CODE_AGENT_MODEL = cfg.codeAgentModel;
+              CODE_THINKING_AGENT_MODEL = cfg.codeThinkingAgentModel;
+              KNOWLEDGE_AGENT_MODEL = cfg.knowledgeAgentModel;
+              FLOWISE_BASE_URL = "http://localhost:3000";
+              OLLAMA_BASE_URL = "http://localhost:11434";
+              CHROMADB_URL = "http://localhost:8000";
+            };
+
             services.ollama = {
               enable = true;
               acceleration = if cfg.gpuAcceleration then "cuda" else null;
@@ -91,14 +102,12 @@
               }];
             };
 
-            # Native ChromaDB service instead of Docker
             services.chromadb = {
               enable = true;
               host = "127.0.0.1";
               port = 8000;
             };
 
-            # Only enable Docker and 32-bit graphics if GPU acceleration is enabled
             hardware.graphics = lib.mkIf cfg.gpuAcceleration {
               enable = true;
               enable32Bit = true;
@@ -143,6 +152,78 @@
               wantedBy = [ "multi-user.target" ];
             };
 
+            # Systemd service to automatically download Ollama models
+            systemd.services.ollama-models-download = {
+              description = "Download Ollama Models for AI Coding Assistant";
+              after = [ "ollama.service" ];
+              requires = [ "ollama.service" ];
+              wantedBy = [ "multi-user.target" ];
+
+              serviceConfig = {
+                Type = "oneshot";
+                RemainAfterExit = true;
+                ExecStart = pkgs.writeShellScript "download-ollama-models" ''
+                  set -euo pipefail
+
+                  # Wait for Ollama to be ready
+                  echo "Waiting for Ollama service..."
+                  for i in {1..30}; do
+                    if ${pkgs.curl}/bin/curl -s http://localhost:11434/api/tags >/dev/null 2>&1; then
+                      echo "Ollama is ready"
+                      break
+                    fi
+                    sleep 2
+                  done
+
+                  # Function to check if model exists
+                  model_exists() {
+                    ${pkgs.ollama}/bin/ollama list | grep -q "^$1"
+                  }
+
+                  # Download models if they don't exist
+                  echo "Checking required models..."
+
+                  if ! model_exists "${cfg.supervisorAgentModel}"; then
+                    echo "Downloading ${cfg.supervisorAgentModel}..."
+                    ${pkgs.ollama}/bin/ollama pull ${cfg.supervisorAgentModel}
+                  else
+                    echo "✓ ${cfg.supervisorAgentModel} already exists"
+                  fi
+
+                  if ! model_exists "${cfg.codeAgentModel}"; then
+                    echo "Downloading ${cfg.codeAgentModel}..."
+                    ${pkgs.ollama}/bin/ollama pull ${cfg.codeAgentModel}
+                  else
+                    echo "✓ ${cfg.codeAgentModel} already exists"
+                  fi
+
+                  if ! model_exists "${cfg.codeThinkingAgentModel}"; then
+                    echo "Downloading ${cfg.codeThinkingAgentModel}..."
+                    ${pkgs.ollama}/bin/ollama pull ${cfg.codeThinkingAgentModel}
+                  else
+                    echo "✓ ${cfg.codeThinkingAgentModel} already exists"
+                  fi
+
+                  if ! model_exists "${cfg.knowledgeAgentModel}"; then
+                    echo "Downloading ${cfg.knowledgeAgentModel}..."
+                    ${pkgs.ollama}/bin/ollama pull ${cfg.knowledgeAgentModel}
+                  else
+                    echo "✓ ${cfg.knowledgeAgentModel} already exists"
+                  fi
+
+                  # Download embedding model
+                  if ! model_exists "nomic-embed-text"; then
+                    echo "Downloading nomic-embed-text..."
+                    ${pkgs.ollama}/bin/ollama pull nomic-embed-text
+                  else
+                    echo "✓ nomic-embed-text already exists"
+                  fi
+
+                  echo "All required models are available"
+                '';
+              };
+            };
+
             environment.systemPackages = with pkgs; [
               nodejs_22
               python311
@@ -155,7 +236,7 @@
               btop
             ] ++ lib.optionals cfg.gpuAcceleration [
               docker
-              nvtopPackages.full
+              nvtopPackages.full  # Fixed: was nvtop
             ];
 
             fileSystems = lib.listToAttrs (lib.imap0 (i: path: {
