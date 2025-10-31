@@ -23,9 +23,11 @@
           pydantic-settings
           langgraph
         ]);
+      # ========================================================================
+      # Build AI Agent Runtime Package (System Level)
+      # ========================================================================
 
-        # Build the runtime package
-        aiAgentRuntime = pkgs.stdenv.mkDerivation {
+      aiAgentRuntime = pkgs.stdenv.mkDerivation {
           name = "ai-agent-runtime";
           src = ./ai-agent-runtime;
 
@@ -48,30 +50,30 @@
           '';
         };
       in
-      {
-        # Export the runtime package
-        packages.ai-agent-runtime = aiAgentRuntime;
-        packages.default = aiAgentRuntime;
+        {
+          # Export the runtime package
+          packages.ai-agent-runtime = aiAgentRuntime;
+          packages.default = aiAgentRuntime;
 
-        # Development shell
-        devShells.default = pkgs.mkShell {
-          buildInputs = with pkgs; [
-            pythonEnv
-            python311Packages.black
-            python311Packages.pylint
-            python311Packages.pytest
-          ];
-        };
-      }
-    ) // {
+          # Development shell
+          devShells.default = pkgs.mkShell {
+            buildInputs = with pkgs; [
+              pythonEnv
+              python311Packages.black
+              python311Packages.pylint
+              python311Packages.pytest
+            ];
+          };
+        }
+        )
+        {
       # ========================================================================
       # NixOS Module (exported at top level for easy import)
       # ========================================================================
 
-      nixosModules.default = { config, lib, pkgs, ... }:
+        nixosModules.default = { config, lib, pkgs, ... }:
         let
-          cfg = config.services.aiAgent;
-
+          cfg = config.aiCodingAssistant;
           # Get the runtime package for this system
           aiAgentRuntime = self.packages.${pkgs.system}.ai-agent-runtime;
 
@@ -193,10 +195,9 @@
               };
             };
 
-            # Firewall
-            networking.firewall.allowedTCPPorts = [ cfg.port ];
+            networking.firewall.allowedTCPPorts = [ cfg.agentServerPort ];
 
-            # System packages
+          }# System packages
             environment.systemPackages = with pkgs; [
               nodejs
               git
@@ -206,18 +207,8 @@
             ] ++ lib.optionals cfg.gpuAcceleration [
               nvtopPackages.full
             ];
-          };
+            homeManagerModules.default = import ./home-manager-module/default.nix;
+
         };
-        aiAgentUserModule = import ./home-manager-module/default.nix;
-
-    in
-    {
-      packages.${system}.ai-agent-runtime = aiAgentRuntime;
-
-      nixosModules.default = aiCodingAssistantModule;
-      nixosModules.aiCodingAssistant = aiCodingAssistantModule;
-
-      homeManagerModules.default = aiAgentUserModule;
-      homeManagerModules.aiAgent = aiAgentUserModule;
     };
 }
