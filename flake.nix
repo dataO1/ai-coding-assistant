@@ -145,52 +145,6 @@
               }
             ];
 
-            # Set PostgreSQL password AFTER database is ready
-            system.activationScripts.setFlowisePassword = lib.stringAfter [ "postgresql" ] ''
-              echo "Setting Flowise database user password..."
-              ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -c "ALTER USER flowise WITH PASSWORD '${cfg.databasePassword}';" 2>/dev/null || true
-              echo "✅ Database password set"
-            '';
-
-            # Setup Flowise configs AFTER PostgreSQL is ready
-            system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "postgresql" "setFlowisePassword" ] ''
-              FLOWISE_HOME="/var/lib/flowise"
-              FLOWS_DIR="$FLOWISE_HOME/flows"
-              CONFIG_SOURCE="${self}/flowise-config"
-
-              echo "Setting up Flowise configuration..."
-
-              ${pkgs.coreutils}/bin/install -d -m 750 -o flowise -g flowise "$FLOWS_DIR"
-
-              # Copy JSON files
-              if [ -d "$CONFIG_SOURCE" ]; then
-                ${pkgs.findutils}/bin/find "$CONFIG_SOURCE" -maxdepth 1 -name '*.json' -exec \
-                  ${pkgs.coreutils}/bin/install -m 644 -o flowise -g flowise {} "$FLOWS_DIR/" \;
-                echo "✅ Workflow JSON files copied"
-              fi
-
-              # Import workflows into database
-              echo "Importing workflows into database..."
-
-              for json_file in "$FLOWS_DIR"/*.json; do
-                if [ -f "$json_file" ]; then
-                  FLOW_NAME=$(basename "$json_file" .json)
-                  FLOW_DATA=$(${pkgs.jq}/bin/jq -c . "$json_file")
-
-                  # Insert into database using psql's dollar quoting (safe from SQL injection)
-                  ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
-                    INSERT INTO chat_flow (name, "flowData", "createdDate", "updatedDate")
-                    VALUES ('$FLOW_NAME', '$FLOW_DATA'::jsonb, NOW(), NOW())
-                    ON CONFLICT (name) DO UPDATE SET
-                      "flowData" = EXCLUDED."flowData",
-                      "updatedDate" = NOW();
-                  SQL
-
-                  echo "✅ Imported: $FLOW_NAME"
-                fi
-              done
-            '';
-
             environment.sessionVariables = {
               SUPERVISOR_AGENT_MODEL = cfg.supervisorAgentModel;
               CODE_AGENT_MODEL = cfg.codeAgentModel;
@@ -265,57 +219,57 @@
               };
             };
 
-            systemd.services.flowise-init = {
-              description = "Initialize Flowise Admin Account";
-              after = [ "flowise.service" ];
-              requires = [ "flowise.service" ];
-              wantedBy = [ "multi-user.target" ];
-
-              serviceConfig = {
-                Type = "oneshot";
-                RemainAfterExit = true;
-
-                ExecStart = pkgs.writeShellScript "init-flowise" ''
-                  FLOWISE_URL="http://localhost:3000"
-                  FLOWISE_ADMIN_USER="admin"
-                  FLOWISE_ADMIN_PASS="${cfg.flowisePassword}"
-                  FLOWISE_EMAIL="${cfg.flowiseEmail}"
-
-                  echo "Waiting for Flowise to start..."
-                  for i in {1..60}; do
-                    if ${pkgs.curl}/bin/curl -s "$FLOWISE_URL" >/dev/null 2>&1; then
-                      echo "✅ Flowise is ready"
-                      break
-                    fi
-                    sleep 2
-                  done
-
-                  echo "Checking if admin account exists..."
-                  VERIFY=$(${pkgs.curl}/bin/curl -s -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
-                    "$FLOWISE_URL/api/v1/verify" 2>/dev/null || echo '{"error":"failed"}')
-
-                  if echo "$VERIFY" | grep -q "error\|Unauthorized"; then
-                    echo "Creating admin account via /api/v1/setup..."
-                    ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
-                      -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
-                      -H "Content-Type: application/json" \
-                      -d "{
-                        \"existingUsername\": \"admin\",
-                        \"existingPassword\": \"$FLOWISE_ADMIN_PASS\",
-                        \"username\": \"Admin\",
-                        \"email\": \"$FLOWISE_EMAIL\",
-                        \"password\": \"$FLOWISE_ADMIN_PASS\"
-                      }" >/dev/null 2>&1
-                    echo "✅ Admin account created"
-                    sleep 2
-                  else
-                    echo "✅ Admin account already exists"
-                  fi
-
-                  echo "✅ Flowise initialization complete"
-                '';
-              };
-            };
+            # systemd.services.flowise-init = {
+            #   description = "Initialize Flowise Admin Account";
+            #   after = [ "flowise.service" ];
+            #   requires = [ "flowise.service" ];
+            #   wantedBy = [ "multi-user.target" ];
+            #
+            #   serviceConfig = {
+            #     Type = "oneshot";
+            #     RemainAfterExit = true;
+            #
+            #     ExecStart = pkgs.writeShellScript "init-flowise" ''
+            #       FLOWISE_URL="http://localhost:3000"
+            #       FLOWISE_ADMIN_USER="admin"
+            #       FLOWISE_ADMIN_PASS="${cfg.flowisePassword}"
+            #       FLOWISE_EMAIL="${cfg.flowiseEmail}"
+            #
+            #       echo "Waiting for Flowise to start..."
+            #       for i in {1..60}; do
+            #         if ${pkgs.curl}/bin/curl -s "$FLOWISE_URL" >/dev/null 2>&1; then
+            #           echo "✅ Flowise is ready"
+            #           break
+            #         fi
+            #         sleep 2
+            #       done
+            #
+            #       echo "Checking if admin account exists..."
+            #       VERIFY=$(${pkgs.curl}/bin/curl -s -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
+            #         "$FLOWISE_URL/api/v1/verify" 2>/dev/null || echo '{"error":"failed"}')
+            #
+            #       if echo "$VERIFY" | grep -q "error\|Unauthorized"; then
+            #         echo "Creating admin account via /api/v1/setup..."
+            #         ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
+            #           -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
+            #           -H "Content-Type: application/json" \
+            #           -d "{
+            #             \"existingUsername\": \"admin\",
+            #             \"existingPassword\": \"$FLOWISE_ADMIN_PASS\",
+            #             \"username\": \"Admin\",
+            #             \"email\": \"$FLOWISE_EMAIL\",
+            #             \"password\": \"$FLOWISE_ADMIN_PASS\"
+            #           }" >/dev/null 2>&1
+            #         echo "✅ Admin account created"
+            #         sleep 2
+            #       else
+            #         echo "✅ Admin account already exists"
+            #       fi
+            #
+            #       echo "✅ Flowise initialization complete"
+            #     '';
+            #   };
+            # };
 
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
