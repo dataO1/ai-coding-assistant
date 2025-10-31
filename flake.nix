@@ -273,9 +273,9 @@
 
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
-              after = [ "flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              after = ["network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
               wants = [ "network-online.target" ];
-              requires = [ "flowise-image-pull.service" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              requires = ["postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
               serviceConfig = {
                 Type = "simple";
