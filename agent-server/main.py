@@ -1,197 +1,254 @@
+# /etc/ai-agent/runtime/server.py
+
 import os
 import json
 import asyncio
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Optional, Any
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
-from uvicorn import run as uvicorn_run
+from pydantic import BaseModel, Field
+import uvicorn
 
-from langchain.chat_models import ChatOllama
+from langchain_community.chat_models import ChatOllama
 from langchain.prompts import ChatPromptTemplate
-from langchain.agents import create_openai_functions_agent, AgentExecutor
 from langchain_mcp import MCPToolkit
+from langgraph.graph import StateGraph, START, END
+from langgraph.types import StateSnapshot
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================================================
-# Configuration Loading
+# Pipeline Definition
 # ============================================================================
 
-class PipelineConfig(BaseModel):
+class ToolRequirement(BaseModel):
+    """Define tool requirements for a pipeline"""
+    required: List[str] = Field(default_factory=list, description="Must be available")
+    optional: List[str] = Field(default_factory=list, description="Nice-to-have")
+    fallback_mode: str = Field(default="degrade", description="degrade|fail")
+
+class PipelineManifest(BaseModel):
+    """Runtime pipeline definition"""
     name: str
     description: str
     model: str
-    tools: List[str]
+    tools: ToolRequirement
     systemPrompt: str
+    contexts: List[str] = Field(default=["nvim", "vscode", "shell"])
 
-class MCPServerConfig(BaseModel):
-    name: str
-    enabled: bool
-    command: str
-    args: List[str]
+class PipelineDiscovery:
+    """Discover and load pipelines from user config"""
 
-class Config:
-    def __init__(self):
-        self.ollama_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-        self.agent_port = int(os.getenv("AGENT_SERVER_PORT", "8080"))
+    def __init__(self, config_dir: Path):
+        self.config_dir = config_dir
+        self.pipelines: Dict[str, PipelineManifest] = {}
+        self._load_pipelines()
 
-        # Load pipeline configs from Nix
-        models_json = os.getenv("MODELS_CONFIG", "{}")
-        self.models = json.loads(models_json)
+    def _load_pipelines(self):
+        """Load pipeline definitions from manifests.json"""
+        manifest_file = self.config_dir / "manifests.json"
 
-        mcp_json = os.getenv("MCP_SERVERS_CONFIG", "{}")
-        self.mcp_servers = json.loads(mcp_json)
-
-        logger.info(f"Loaded {len(self.models)} models")
-        logger.info(f"Loaded {len(self.mcp_servers)} MCP servers")
-
-config = Config()
-
-# ============================================================================
-# MCP Toolkit Management
-# ============================================================================
-
-class MCPRegistry:
-    def __init__(self):
-        self.toolkits: Dict[str, MCPToolkit] = {}
-        self._init_mcp_servers()
-
-    def _init_mcp_servers(self):
-        """Initialize MCP servers from config"""
-        mcp_configs = {}
-
-        for name, server_config in config.mcp_servers.items():
-            if server_config.get("enabled", True):
-                cmd = server_config["command"]
-                args = server_config.get("args", [])
-                full_cmd = f"{cmd} {' '.join(args)}"
-                mcp_configs[name] = full_cmd
-                logger.info(f"Registered MCP server: {name}")
-
-        # Initialize toolkit with all servers
-        try:
-            self.toolkit = MCPToolkit(servers=mcp_configs)
-            logger.info("MCPToolkit initialized successfully")
-        except Exception as e:
-            logger.warning(f"Could not initialize MCPToolkit: {e}")
-            self.toolkit = None
-
-    def get_tools(self, tool_names: List[str]):
-        """Get specific tools from toolkit"""
-        if not self.toolkit:
-            logger.warning("MCPToolkit not available")
-            return []
+        if not manifest_file.exists():
+            logger.warning(f"No manifests found at {manifest_file}")
+            return
 
         try:
-            all_tools = self.toolkit.get_tools()
-            filtered_tools = [t for t in all_tools if any(name in t.name.lower() for name in tool_names)]
-            return filtered_tools
-        except Exception as e:
-            logger.warning(f"Could not get tools: {e}")
-            return []
+            with open(manifest_file) as f:
+                data = json.load(f)
 
-mcp_registry = MCPRegistry()
-
-# ============================================================================
-# Pipeline Management
-# ============================================================================
-
-class PipelineFactory:
-    def __init__(self):
-        self.pipelines: Dict[str, AgentExecutor] = {}
-        self._build_pipelines()
-
-    def _build_pipelines(self):
-        """Build all pipelines from config"""
-        for pipeline_name, pipeline_config in config.models.items():
-            try:
-                self.pipelines[pipeline_name] = self._create_pipeline(
-                    pipeline_name, pipeline_config
+            for name, pipeline_data in data.get("pipelines", {}).items():
+                manifest = PipelineManifest(
+                    name=name,
+                    description=pipeline_data.get("description", ""),
+                    model=pipeline_data.get("model", ""),
+                    systemPrompt=pipeline_data.get("systemPrompt", ""),
+                    contexts=pipeline_data.get("contexts", ["nvim", "vscode", "shell"]),
+                    tools=ToolRequirement(
+                        required=pipeline_data.get("requiredTools", []),
+                        optional=pipeline_data.get("optionalTools", []),
+                        fallback_mode=pipeline_data.get("fallbackMode", "degrade"),
+                    )
                 )
-                logger.info(f"Built pipeline: {pipeline_name}")
-            except Exception as e:
-                logger.error(f"Failed to build pipeline {pipeline_name}: {e}")
+                self.pipelines[name] = manifest
+                logger.info(f"Discovered pipeline: {name}")
+        except Exception as e:
+            logger.error(f"Failed to load pipelines: {e}")
 
-    def _create_pipeline(self, name: str, pipeline_config: Dict[str, Any]) -> AgentExecutor:
-        """Create a single pipeline"""
-        model_name = pipeline_config.get("model", config.models.get("supervisor", "qwen2.5-coder:7b"))
-        tools = pipeline_config.get("tools", [])
-        system_prompt = pipeline_config.get("systemPrompt", "You are a helpful AI assistant.")
-
-        # Initialize LLM
-        llm = ChatOllama(
-            model=model_name,
-            base_url=config.ollama_url,
-            temperature=0.2,
-            top_p=0.9,
-        )
-
-        # Get tools
-        agent_tools = mcp_registry.get_tools(tools)
-
-        # Create prompt
-        prompt = ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", "{input}"),
-            ("placeholder", "{agent_scratchpad}"),
-        ])
-
-        # Create agent
-        agent = create_openai_functions_agent(llm, agent_tools, prompt)
-        executor = AgentExecutor(
-            agent=agent,
-            tools=agent_tools,
-            verbose=True,
-            handle_parsing_errors=True,
-            max_iterations=10,
-        )
-
-        return executor
-
-    def get_pipeline(self, name: str) -> Optional[AgentExecutor]:
+    def get_pipeline(self, name: str) -> Optional[PipelineManifest]:
         return self.pipelines.get(name)
 
-pipeline_factory = PipelineFactory()
+    def list_pipelines(self) -> List[PipelineManifest]:
+        return list(self.pipelines.values())
 
 # ============================================================================
-# FastAPI Application
+# Context-Aware Tool Resolution
 # ============================================================================
 
-class QueryRequest(BaseModel):
-    pipeline: str = "coding"
-    query: str
+class ContextAwareMCPRegistry:
+    """MCP tools with context awareness"""
 
-class QueryResponse(BaseModel):
-    pipeline: str
-    query: str
-    response: str
-    model: str
+    def __init__(self, mcp_config: Dict[str, Dict]):
+        self.mcp_config = mcp_config
+        self.toolkits: Dict[str, MCPToolkit] = {}
+        self._init_toolkits()
+
+    def _init_toolkits(self):
+        """Initialize MCP toolkits for each context"""
+        # TODO: Implement context-specific toolkit initialization
+        pass
+
+    def get_tools(
+        self,
+        tool_names: List[str],
+        context: str,  # "nvim", "vscode", "shell"
+        required: bool = False
+    ) -> List:
+        """Get tools, respecting context availability"""
+        available_tools = []
+
+        # Determine which tools are available in this context
+        context_mcp_map = {
+            "nvim": ["nvim-mcp", "lsp", "tree-sitter", "filesystem", "git"],
+            "vscode": ["continue-mcp", "lsp", "filesystem", "git"],
+            "shell": ["filesystem", "git", "web-search"],
+        }
+
+        available = context_mcp_map.get(context, [])
+
+        for tool in tool_names:
+            if tool in available:
+                available_tools.append(tool)
+            elif required:
+                raise ValueError(f"Required tool '{tool}' not available in context '{context}'")
+
+        return available_tools
+
+    def resolve_tools(
+        self,
+        manifest: PipelineManifest,
+        context: str
+    ) -> List:
+        """Resolve tools with fallback support"""
+        try:
+            # Try to get required tools
+            required = self.get_tools(manifest.tools.required, context, required=True)
+            logger.info(f"Resolved required tools: {required}")
+        except ValueError as e:
+            if manifest.tools.fallback_mode == "fail":
+                raise
+            logger.warning(f"Required tools missing, degrading: {e}")
+            required = []
+
+        # Try to get optional tools (non-fatal if missing)
+        optional = []
+        try:
+            optional = self.get_tools(manifest.tools.optional, context, required=False)
+        except:
+            pass
+
+        logger.info(f"Resolved optional tools: {optional}")
+        return required + optional
+
+# ============================================================================
+# LangGraph-Based Pipeline Executor
+# ============================================================================
+
+class PipelineExecutor:
+    """Execute pipelines with LangGraph for state management"""
+
+    def __init__(
+        self,
+        manifest: PipelineManifest,
+        mcp_registry: ContextAwareMCPRegistry,
+        ollama_url: str,
+    ):
+        self.manifest = manifest
+        self.mcp_registry = mcp_registry
+        self.ollama_url = ollama_url
+        self.llm = ChatOllama(
+            model=manifest.model,
+            base_url=ollama_url,
+            temperature=0.2,
+        )
+
+    def create_graph(self, context: str):
+        """Create a LangGraph state machine for this pipeline"""
+
+        # Resolve tools based on context
+        tools = self.mcp_registry.resolve_tools(self.manifest, context)
+
+        # Create graph
+        graph_builder = StateGraph(dict)
+
+        # Define processing node
+        def process(state: dict) -> dict:
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", self.manifest.systemPrompt),
+                ("human", "{input}"),
+            ])
+
+            chain = prompt | self.llm
+            result = chain.invoke({"input": state["input"]})
+
+            return {
+                **state,
+                "output": result.content,
+                "tools_used": [t.name for t in tools],
+            }
+
+        graph_builder.add_node("process", process)
+        graph_builder.add_edge(START, "process")
+        graph_builder.add_edge("process", END)
+
+        return graph_builder.compile()
+
+    async def execute(self, query: str, context: str) -> Dict[str, Any]:
+        """Execute pipeline with given query and context"""
+        logger.info(f"Executing pipeline '{self.manifest.name}' in context '{context}'")
+
+        graph = self.create_graph(context)
+
+        result = await asyncio.to_thread(
+            graph.invoke,
+            {"input": query}
+        )
+
+        return result
+
+# ============================================================================
+# FastAPI Server
+# ============================================================================
+
+config_dir = Path.home() / ".config" / "ai-agent"
+pipeline_discovery = PipelineDiscovery(config_dir)
+mcp_registry = ContextAwareMCPRegistry({})
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info(f"Starting AI Agent Server on port {config.agent_port}")
+    logger.info("Starting AI Agent Server with runtime pipeline discovery")
     yield
-    logger.info("Shutting down AI Agent Server")
+    logger.info("Shutting down")
 
 app = FastAPI(
-    title="AI Agent Server",
-    description="LangChain-based AI agent with MCP support",
-    version="1.0.0",
+    title="AI Agent Runtime",
+    description="LangChain + LangGraph + MCP with context awareness",
     lifespan=lifespan,
 )
 
+class QueryRequest(BaseModel):
+    pipeline: str
+    query: str
+    context: str = "shell"
+
 @app.get("/health")
-async def health_check():
-    """Health check endpoint"""
+async def health():
     return {
         "status": "healthy",
-        "pipelines": list(pipeline_factory.pipelines.keys()),
-        "mcp_servers": list(config.mcp_servers.keys()),
+        "pipelines": len(pipeline_discovery.list_pipelines()),
     }
 
 @app.get("/api/pipelines")
@@ -199,118 +256,49 @@ async def list_pipelines():
     """List all available pipelines"""
     return [
         {
-            "name": name,
-            "model": config.models.get(name, {}).get("model", "unknown"),
+            "name": p.name,
+            "description": p.description,
+            "model": p.model,
+            "contexts": p.contexts,
         }
-        for name in pipeline_factory.pipelines.keys()
+        for p in pipeline_discovery.list_pipelines()
     ]
 
 @app.post("/api/query")
 async def query(request: QueryRequest):
-    """Query an agent pipeline"""
-    pipeline_name = request.pipeline
-    query_text = request.query
+    """Query a pipeline with context awareness"""
+    manifest = pipeline_discovery.get_pipeline(request.pipeline)
 
-    # Get pipeline
-    pipeline = pipeline_factory.get_pipeline(pipeline_name)
-    if not pipeline:
+    if not manifest:
+        raise HTTPException(status_code=404, detail=f"Pipeline '{request.pipeline}' not found")
+
+    # Check if pipeline supports this context
+    if request.context not in manifest.contexts:
         raise HTTPException(
-            status_code=404,
-            detail=f"Pipeline '{pipeline_name}' not found"
+            status_code=400,
+            detail=f"Pipeline '{request.pipeline}' doesn't support context '{request.context}'"
         )
 
     try:
-        logger.info(f"Processing query on pipeline '{pipeline_name}'")
-
-        # Run agent
-        result = await asyncio.to_thread(
-            pipeline.invoke,
-            {"input": query_text}
+        executor = PipelineExecutor(
+            manifest,
+            mcp_registry,
+            os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
         )
 
-        response_text = result.get("output", "No response generated")
-        model_name = config.models.get(pipeline_name, {}).get("model", "unknown")
-
-        return QueryResponse(
-            pipeline=pipeline_name,
-            query=query_text,
-            response=response_text,
-            model=model_name,
-        )
-    except Exception as e:
-        logger.error(f"Error processing query: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Error processing query: {str(e)}"
-        )
-
-@app.get("/v1/models")
-async def list_models():
-    """OpenAI-compatible models endpoint (for Continue.dev, Avante)"""
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": name,
-                "object": "model",
-                "created": 0,
-                "owned_by": "local",
-            }
-            for name in pipeline_factory.pipelines.keys()
-        ]
-    }
-
-@app.post("/v1/chat/completions")
-async def chat_completions(request: dict):
-    """OpenAI-compatible chat endpoint"""
-    pipeline = request.get("model", "coding")
-    messages = request.get("messages", [])
-
-    # Extract query from messages
-    query_text = messages[-1]["content"] if messages else "Help me"
-
-    # Get pipeline
-    agent_pipeline = pipeline_factory.get_pipeline(pipeline)
-    if not agent_pipeline:
-        raise HTTPException(status_code=404, detail=f"Pipeline '{pipeline}' not found")
-
-    try:
-        result = await asyncio.to_thread(
-            agent_pipeline.invoke,
-            {"input": query_text}
-        )
-
-        response_text = result.get("output", "No response generated")
+        result = await executor.execute(request.query, request.context)
 
         return {
-            "id": "local",
-            "object": "chat.completion",
-            "created": 0,
-            "model": pipeline,
-            "choices": [
-                {
-                    "index": 0,
-                    "message": {
-                        "role": "assistant",
-                        "content": response_text,
-                    },
-                    "finish_reason": "stop",
-                }
-            ],
-            "usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
-            }
+            "pipeline": request.pipeline,
+            "context": request.context,
+            "query": request.query,
+            "response": result.get("output"),
+            "tools_used": result.get("tools_used", []),
         }
     except Exception as e:
-        logger.error(f"Error in chat completions: {e}", exc_info=True)
+        logger.error(f"Error executing pipeline: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 if __name__ == "__main__":
-    uvicorn_run(
-        app,
-        host="0.0.0.0",
-        port=config.agent_port,
-        log_level="info",
-    )
+    port = int(os.getenv("AGENT_SERVER_PORT", "8080"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
