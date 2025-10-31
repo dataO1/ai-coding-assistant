@@ -1,143 +1,152 @@
-# home-manager-module/default.nix - USER LEVEL
-
 { config, lib, pkgs, ... }:
+  let
+    cfg = config.programs.aiAgent;
 
-let
-  cfg = config.programs.aiAgent;
+    pipelineModule = lib.types.submodule {
+      options = {
+        description = lib.mkOption { type = lib.types.str; };
+        model = lib.mkOption { type = lib.types.str; };
 
-  # Pipeline discovery: scan user's pipeline directory
-  pipelineDir = "${config.home.configHome}/ai-agent/pipelines";
-
-  # Pipeline module
-  pipelineModule = lib.types.submodule {
-    options = {
-      description = lib.mkOption { type = lib.types.str; };
-      model = lib.mkOption { type = lib.types.str; };
-
-      # Context requirements
-      requiredTools = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [];
-        description = "Tools that MUST be available";
-      };
-
-      optionalTools = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [];
-        description = "Tools that improve quality if available";
-      };
-
-      fallbackMode = lib.mkOption {
-        type = lib.types.enum [ "degrade" "fail" ];
-        default = "degrade";
-        description = "How to handle missing tools";
-      };
-
-      systemPrompt = lib.mkOption { type = lib.types.str; };
-
-      # Context sources this pipeline works with
-      contexts = lib.mkOption {
-        type = lib.types.listOf (lib.types.enum [ "nvim" "vscode" "shell" "web" ]);
-        default = [ "nvim" "vscode" "shell" ];
-        description = "Which contexts this pipeline supports";
-      };
-    };
-  };
-
-in
-{
-  options.programs.aiAgent = {
-    enable = lib.mkEnableOption "AI Agent user configuration";
-
-    serverUrl = lib.mkOption {
-      type = lib.types.str;
-      default = "http://localhost:8080";
-    };
-
-    # User-defined pipelines (ONLY at user level)
-    pipelines = lib.mkOption {
-      type = lib.types.attrsOf pipelineModule;
-      default = {};
-      description = "User-defined AI agent pipelines";
-    };
-
-    # Local MCP servers (extend system MCPs)
-    mcpServers = lib.mkOption {
-      type = lib.types.attrsOf (lib.types.submodule {
-        options = {
-          enable = lib.mkOption {
-            type = lib.types.bool;
-            default = true;
-          };
-          command = lib.mkOption { type = lib.types.str; };
-          args = lib.mkOption {
-            type = lib.types.listOf lib.types.str;
-            default = [];
-          };
+        requiredTools = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "Tools that MUST be available";
         };
-      });
-      default = {};
-      description = "Additional MCP servers for this user";
+
+        optionalTools = lib.mkOption {
+          type = lib.types.listOf lib.types.str;
+          default = [];
+          description = "Tools that improve quality if available";
+        };
+
+        fallbackMode = lib.mkOption {
+          type = lib.types.enum [ "degrade" "fail" ];
+          default = "degrade";
+          description = "How to handle missing tools";
+        };
+
+        systemPrompt = lib.mkOption { type = lib.types.str; };
+
+        contexts = lib.mkOption {
+          type = lib.types.listOf (lib.types.enum [ "nvim" "vscode" "shell" "web" ]);
+          default = [ "nvim" "vscode" "shell" ];
+          description = "Which contexts this pipeline supports";
+        };
+      };
+    };
+  in
+  {
+    options.programs.aiAgent = {
+      enable = lib.mkEnableOption "AI Agent user configuration";
+
+      serverUrl = lib.mkOption {
+        type = lib.types.str;
+        default = "http://localhost:8080";
+        description = "AI Agent server URL";
+      };
+
+      pipelines = lib.mkOption {
+        type = lib.types.attrsOf pipelineModule;
+        default = {};
+        description = "User-defined AI agent pipelines";
+      };
+
+      mcpServers = lib.mkOption {
+        type = lib.types.attrsOf (lib.types.submodule {
+          options = {
+            enable = lib.mkOption {
+              type = lib.types.bool;
+              default = true;
+            };
+            command = lib.mkOption { type = lib.types.str; };
+            args = lib.mkOption {
+              type = lib.types.listOf lib.types.str;
+              default = [];
+            };
+          };
+        });
+        default = {};
+        description = "Additional MCP servers for this user";
+      };
+
+      neovimIntegration = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+      };
+
+      vscodeIntegration = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+      };
+
+      shellIntegration = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+      };
     };
 
-    neovimIntegration = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-    };
+    config = lib.mkIf cfg.enable {
+      # Create pipeline configuration directory
+      home.file.".config/ai-agent" = {
+        source = ./ai-agent-config;
+        recursive = true;
+      };
 
-    vscodeIntegration = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-    };
-
-    shellIntegration = lib.mkOption {
-      type = lib.types.bool;
-      default = true;
-    };
-  };
-
-  config = lib.mkIf cfg.enable {
-    home.file = {
-      # Create pipeline directory
-      ".config/ai-agent/pipelines/.gitkeep".text = "";
-
-      # Pipeline manifests (generated from Nix config)
-      ".config/ai-agent/manifests.json".text = builtins.toJSON {
+      # Generate manifests from Nix config
+      home.file.".config/ai-agent/manifests.json".text = builtins.toJSON {
         pipelines = cfg.pipelines;
         mcpServers = cfg.mcpServers;
+        serverUrl = cfg.serverUrl;
       };
 
-      # Agent CLI
-      ".local/bin/ai".source = pkgs.writeShellScript "ai-cli" ''
+      # Agent CLI tool
+      home.file.".local/bin/ai".source = pkgs.writeShellScript "ai-cli" ''
         #!/usr/bin/env bash
+        set -euo pipefail
+
         AGENT_URL="${cfg.serverUrl}"
-        PIPELINE="''${1:-coding}"
+        PIPELINE="''${1:-supervisor}"
         QUERY="''${@:2}"
 
         if [ -z "$QUERY" ]; then
-          echo "Usage: ai <pipeline> <query...>"
-          curl -s "$AGENT_URL/api/pipelines" | ${pkgs.jq}/bin/jq -r '.[] | "  - \(.name): \(.description)"'
+          echo "Usage: ai [pipeline] <query...>"
+          echo ""
+          echo "Available pipelines:"
+          curl -s "$AGENT_URL/api/pipelines" 2>/dev/null | \
+            ${pkgs.jq}/bin/jq -r '.[] | "  \(.name): \(.description)"' || \
+            echo "  (Unable to fetch - is server running?)"
           exit 1
         fi
 
+        # Query with context
         curl -s -X POST "$AGENT_URL/api/query" \
           -H "Content-Type: application/json" \
-          -d "{\"pipeline\": \"$PIPELINE\", \"query\": \"$QUERY\", \"context\": \"shell\"}" | \
-          ${pkgs.jq}/bin/jq -r '.response // .error'
+          -d "{\"query\": \"$QUERY\", \"context\": \"shell\", \"pipeline\": \"$PIPELINE\"}" | \
+          ${pkgs.jq}/bin/jq -r '.response // .error // "No response"'
       '';
 
-      # Neovim config
-      ".config/nvim/lua/plugins/ai-agent.lua" = lib.mkIf cfg.neovimIntegration {
+      # Neovim configuration
+      home.file.".config/nvim/lua/plugins/ai-agent.lua" = lib.mkIf cfg.neovimIntegration {
         text = ''
           return {
             {
               "yetone/avante.nvim",
               event = "VeryLazy",
+              lazy = false,
               opts = {
                 provider = "openai",
                 openai = {
                   endpoint = "${cfg.serverUrl}/v1",
-                  model = "local",
+                  model = "supervisor",
+                  timeout = 30000,
+                  temperature = 0.2,
+                  max_tokens = 4096,
+                },
+                behaviour = {
+                  auto_suggestions = false,
+                  auto_set_highlight_group = true,
+                  auto_set_keymaps = true,
+                  auto_apply_diff_after_generation = false,
                 },
               },
               build = "make",
@@ -150,9 +159,22 @@ in
           }
         '';
       };
-    };
 
-    programs.neovim.enable = cfg.neovimIntegration;
-    programs.vscode.enable = cfg.vscodeIntegration;
+      # Shell aliases
+      home.shellAliases = lib.mkIf cfg.shellIntegration {
+        ai-supervisor = "ai supervisor";
+        ai-code = "ai code-expert";
+        ai-research = "ai knowledge-scout";
+        ai-refactor = "ai refactoring";
+        ai-debug = "ai debug";
+      };
+
+      # Required packages
+      home.packages = with pkgs; [
+        curl
+        jq
+      ];
+
+      programs.neovim.enable = cfg.neovimIntegration;
+    };
   };
-}
