@@ -24,11 +24,14 @@
               default = true;
               description = "Enable GPU acceleration for Ollama.";
             };
-            flowisePassword = lib.mkOption {
-              type = lib.types.str;
-              default = "changeme";
-              description = "Password for Flowise dashboard login.";
-            };
+          flowisePassword = lib.mkOption {
+            type = lib.types.str;
+            default = "changeme";
+            description = "Password for Flowise dashboard login.";
+            example = "MySecure@Pass123!";
+          };
+
+          # Add assertion to validate password
             flowiseSecretKey = lib.mkOption {
               type = lib.types.str;
               default = "";
@@ -78,6 +81,23 @@
               home = "/var/lib/flowise";
               group = "flowise";
             };
+
+            assertions = [
+              {
+                assertion = builtins.stringLength cfg.flowisePassword >= 8 &&
+                            builtins.match ".*[a-z].*" cfg.flowisePassword != null &&
+                            builtins.match ".*[A-Z].*" cfg.flowisePassword != null &&
+                            builtins.match ".*[0-9].*" cfg.flowisePassword != null &&
+                            builtins.match ".*[^a-zA-Z0-9].*" cfg.flowisePassword != null;
+                message = ''
+                  aiCodingAssistant.flowisePassword must be at least 8 characters long
+                  and contain at least one lowercase letter, one uppercase letter,
+                  one digit, and one special character.
+
+                  Example: MySecure@Pass123!
+                '';
+              }
+            ];
 
             users.groups.flowise = {};
 
