@@ -7,31 +7,30 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, ... }:
+    let
+      # Python environment for the runtime
+      pythonEnv = pkgs: pkgs.python311.withPackages (ps: with ps; [
+        langchain
+        langchain-community
+        langchain-openai
+        fastapi
+        uvicorn
+        pydantic
+        pydantic-settings
+        langgraph
+      ]);
+    in
     flake-utils.lib.eachDefaultSystem (system:
       let
         pkgs = nixpkgs.legacyPackages.${system};
         lib = nixpkgs.lib;
 
-        # Python environment for the runtime
-        pythonEnv = pkgs.python311.withPackages (ps: with ps; [
-          langchain
-          langchain-community
-          langchain-openai
-          fastapi
-          uvicorn
-          pydantic
-          pydantic-settings
-          langgraph
-        ]);
-      # ========================================================================
-      # Build AI Agent Runtime Package (System Level)
-      # ========================================================================
-
-      aiAgentRuntime = pkgs.stdenv.mkDerivation {
+        # Build the runtime package
+        aiAgentRuntime = pkgs.stdenv.mkDerivation {
           name = "ai-agent-runtime";
           src = ./ai-agent-runtime;
 
-          buildInputs = [ pythonEnv ];
+          buildInputs = [ (pythonEnv pkgs) ];
 
           installPhase = ''
             mkdir -p $out/lib/ai-agent
@@ -44,49 +43,36 @@
             cat > $out/bin/ai-agent-server << 'EOF'
             #!/usr/bin/env bash
             export PYTHONPATH="$out/lib/ai-agent:$PYTHONPATH"
-            exec ${pythonEnv}/bin/python "$out/lib/ai-agent/server.py" "$@"
+            exec ${(pythonEnv pkgs)}/bin/python "$out/lib/ai-agent/server.py" "$@"
             EOF
             chmod +x $out/bin/ai-agent-server
           '';
         };
       in
-        {
-          # Export the runtime package
-          packages.ai-agent-runtime = aiAgentRuntime;
-          packages.default = aiAgentRuntime;
+      {
+        # Export the runtime package
+        packages.ai-agent-runtime = aiAgentRuntime;
+        packages.default = aiAgentRuntime;
 
-          # Development shell
-          devShells.default = pkgs.mkShell {
-            buildInputs = with pkgs; [
-              pythonEnv
-              python311Packages.black
-              python311Packages.pylint
-              python311Packages.pytest
-            ];
-          };
-        }
-        )
-        {
+        # Development shell
+        devShells.default = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            (pythonEnv pkgs)
+            python311Packages.black
+            python311Packages.pylint
+            python311Packages.pytest
+          ];
+        };
+      }
+    ) // {
       # ========================================================================
-      # NixOS Module (exported at top level for easy import)
+      # NixOS Module (top-level exports)
       # ========================================================================
 
-        nixosModules.default = { config, lib, pkgs, ... }:
+      nixosModules.default = { config, lib, pkgs, ... }:
         let
-          cfg = config.aiCodingAssistant;
-          # Get the runtime package for this system
+          cfg = config.services.aiAgent;
           aiAgentRuntime = self.packages.${pkgs.system}.ai-agent-runtime;
-
-          pythonEnv = pkgs.python311.withPackages (ps: with ps; [
-            langchain
-            langchain-community
-            langchain-openai
-            fastapi
-            uvicorn
-            pydantic
-            pydantic-settings
-            langgraph
-          ]);
         in
         {
           options.services.aiAgent = {
@@ -178,7 +164,6 @@
               environment = {
                 OLLAMA_BASE_URL = "http://${cfg.ollamaHost}:${toString cfg.ollamaPort}";
                 AGENT_SERVER_PORT = toString cfg.port;
-                # User manifests come from Home Manager
                 AI_AGENT_MANIFESTS = "%h/.config/ai-agent/manifests.json";
                 PYTHONUNBUFFERED = "1";
               };
@@ -195,20 +180,23 @@
               };
             };
 
-            networking.firewall.allowedTCPPorts = [ cfg.agentServerPort ];
+            networking.firewall.allowedTCPPorts = [ cfg.port ];
 
-          }# System packages
             environment.systemPackages = with pkgs; [
               nodejs
               git
               curl
               aiAgentRuntime
-              pythonEnv
             ] ++ lib.optionals cfg.gpuAcceleration [
               nvtopPackages.full
             ];
-            homeManagerModules.default = import ./home-manager-module/default.nix;
-
+          };
         };
+
+      # ========================================================================
+      # Home Manager Module
+      # ========================================================================
+
+      homeManagerModules.default = import ./home-manager-module/default.nix;
     };
 }
