@@ -50,7 +50,8 @@
           workflowJson = builtins.toJSON mainWorkflow;
         in
         {
-          gpuAcceleration = lib.mkOption {
+          options.aiCodingAssistant = {
+            gpuAcceleration = lib.mkOption {
               type = lib.types.bool;
               default = true;
               description = "Enable GPU acceleration for Ollama.";
@@ -68,46 +69,53 @@
               example = "MySecure@Pass123!";
             };
 
-          # Add assertion to validate password
             flowiseSecretKey = lib.mkOption {
               type = lib.types.str;
+              default = "change_me_random_secret_key";
               description = "Secret key for Flowise dashboard security.";
             };
+
             flowiseVersion = lib.mkOption {
               type = lib.types.str;
               default = flowiseVersion;
               description = "Flowise Docker image version.";
             };
+
             projectsFileSystemPaths = lib.mkOption {
               type = lib.types.listOf lib.types.str;
               default = [];
               example = [ "/home/user/projects" ];
               description = "List of directories exposed via bind mount to MCP tools.";
             };
+
             supervisorAgentModel = lib.mkOption {
               type = lib.types.str;
               default = "qwen2.5-coder:7b";
               description = "Model for Supervisor (Router) agent.";
             };
+
             codeAgentModel = lib.mkOption {
               type = lib.types.str;
               default = "qwen2.5-coder:14b";
               description = "Model for Code Expert agent.";
             };
+
             codeThinkingAgentModel = lib.mkOption {
               type = lib.types.str;
               default = "deepseek-coder:33b";
               description = "Model for Code Thinking agent.";
             };
+
             knowledgeAgentModel = lib.mkOption {
               type = lib.types.str;
               default = "qwen2.5-coder:70b";
               description = "Model for Knowledge Scout agent.";
             };
+
             databasePassword = lib.mkOption {
               type = lib.types.str;
-              default = "flowise_default_password";
               description = "Password for Flowise PostgreSQL database user.";
+              example = "SecureDBPass123!";
             };
           };
 
@@ -117,6 +125,8 @@
               home = "/var/lib/flowise";
               group = "flowise";
             };
+
+            users.groups.flowise = {};
 
             assertions = [
               {
@@ -135,9 +145,14 @@
               }
             ];
 
-            users.groups.flowise = {};
+            # Set PostgreSQL password AFTER database is ready
+            system.activationScripts.setFlowisePassword = lib.stringAfter [ "postgresql" ] ''
+              echo "Setting Flowise database user password..."
+              ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -c "ALTER USER flowise WITH PASSWORD '${cfg.databasePassword}';" 2>/dev/null || true
+              echo "✅ Database password set"
+            '';
 
-            # Setup Flowise configs directly in home
+            # Setup Flowise configs AFTER PostgreSQL is ready
             system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "postgresql" "setFlowisePassword" ] ''
               FLOWISE_HOME="/var/lib/flowise"
               FLOWS_DIR="$FLOWISE_HOME/flows"
@@ -205,7 +220,6 @@
               ];
             };
 
-            # Update PostgreSQL configuration
             services.postgresql = {
               enable = true;
               ensureDatabases = [ "flowise" ];
@@ -214,14 +228,12 @@
                 ensureDBOwnership = true;
               }];
 
-              # Enable password authentication for localhost
               authentication = lib.mkOverride 10 ''
                 local all all peer
                 host flowise flowise 127.0.0.1/32 scram-sha-256
                 host flowise flowise ::1/128 scram-sha-256
               '';
             };
-
 
             services.chromadb = {
               enable = true;
@@ -239,14 +251,6 @@
               enableNvidia = cfg.gpuAcceleration;
             };
 
-            # Add activation script to set PostgreSQL password
-          # Set PostgreSQL password AFTER database is ready
-            system.activationScripts.setFlowisePassword = lib.stringAfter [ "postgresql" ] ''
-              echo "Setting Flowise database user password..."
-              ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -c "ALTER USER flowise WITH PASSWORD '${cfg.databasePassword}';" 2>/dev/null || true
-              echo "✅ Database password set"
-            '';
-            # Add this service before the flowise service
             systemd.services.flowise-image-pull = {
               description = "Pre-pull Flowise Docker Image";
               after = [ "docker.service" ];
@@ -256,13 +260,13 @@
               serviceConfig = {
                 Type = "oneshot";
                 RemainAfterExit = true;
-                TimeoutStartSec = "10min";  # Generous timeout for slow connections
+                TimeoutStartSec = "10min";
                 ExecStart = "${pkgs.docker}/bin/docker pull flowiseai/flowise:${cfg.flowiseVersion}";
               };
             };
 
             systemd.services.flowise-init = {
-              description = "Initialize Flowise Admin Account and Import Workflows";
+              description = "Initialize Flowise Admin Account";
               after = [ "flowise.service" ];
               requires = [ "flowise.service" ];
               wantedBy = [ "multi-user.target" ];
@@ -286,12 +290,11 @@
                     sleep 2
                   done
 
-                  # Setup admin account if needed via API endpoint: POST /api/v1/setup
                   echo "Checking if admin account exists..."
                   VERIFY=$(${pkgs.curl}/bin/curl -s -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
                     "$FLOWISE_URL/api/v1/verify" 2>/dev/null || echo '{"error":"failed"}')
 
-                  if echo "$VERIFY" | grep "Unauthorized"; then
+                  if echo "$VERIFY" | grep -q "error\|Unauthorized"; then
                     echo "Creating admin account via /api/v1/setup..."
                     ${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/setup" \
                       -u "$FLOWISE_ADMIN_USER:$FLOWISE_ADMIN_PASS" \
@@ -313,10 +316,10 @@
                 '';
               };
             };
-            # Flowise Docker service with pinned version
+
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
-              after = ["flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              after = [ "flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
               wants = [ "network-online.target" ];
               requires = [ "flowise-image-pull.service" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
@@ -395,7 +398,6 @@
       nixosModules.default = aiCodingAssistantModule;
       nixosModules.ai-coding-assistant = aiCodingAssistantModule;
 
-      # Export version for inspection
       version = flowiseVersion;
     };
 }
