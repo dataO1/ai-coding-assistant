@@ -138,7 +138,6 @@
             users.groups.flowise = {};
 
             # Setup Flowise configs directly in home
-          # Setup Flowise configs AFTER PostgreSQL is ready
             system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "postgresql" "setFlowisePassword" ] ''
               FLOWISE_HOME="/var/lib/flowise"
               FLOWS_DIR="$FLOWISE_HOME/flows"
@@ -155,21 +154,18 @@
                 echo "✅ Workflow JSON files copied"
               fi
 
-              # Import workflows into database (no public API endpoint for this)
+              # Import workflows into database
               echo "Importing workflows into database..."
 
               for json_file in "$FLOWS_DIR"/*.json; do
                 if [ -f "$json_file" ]; then
-                  FLOW_NAME=$(basename "${json_file%.json}")
+                  FLOW_NAME=$(basename "$json_file" .json)
                   FLOW_DATA=$(${pkgs.jq}/bin/jq -c . "$json_file")
 
-                  # Escape single quotes for SQL
-                  FLOW_DATA_ESCAPED=$(echo "$FLOW_DATA" | sed "s/'/\'\'/g")
-
-                  # Insert into database
+                  # Insert into database using psql's dollar quoting (safe from SQL injection)
                   ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
                     INSERT INTO chat_flow (name, "flowData", "createdDate", "updatedDate")
-                    VALUES ('$FLOW_NAME', '$FLOW_DATA_ESCAPED', NOW(), NOW())
+                    VALUES ('$FLOW_NAME', '$FLOW_DATA'::jsonb, NOW(), NOW())
                     ON CONFLICT (name) DO UPDATE SET
                       "flowData" = EXCLUDED."flowData",
                       "updatedDate" = NOW();
