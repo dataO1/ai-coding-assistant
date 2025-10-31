@@ -9,6 +9,9 @@
     let
       lib = nixpkgs.lib;
 
+      # Define Flowise version here (update this and run nix flake update)
+      flowiseVersion = "2.1.3";  # ← Change this to update Flowise
+
       aiCodingAssistantModule = { config, pkgs, lib, ... }:
         let
           cfg = config.aiCodingAssistant;
@@ -29,6 +32,11 @@
               type = lib.types.str;
               default = "";
               description = "Secret key for Flowise dashboard security.";
+            };
+            flowiseVersion = lib.mkOption {
+              type = lib.types.str;
+              default = flowiseVersion;
+              description = "Flowise Docker image version.";
             };
             projectsFileSystemPaths = lib.mkOption {
               type = lib.types.listOf lib.types.str;
@@ -67,7 +75,6 @@
 
             users.groups.flowise = {};
 
-            # Global environment variables
             environment.sessionVariables = {
               SUPERVISOR_AGENT_MODEL = cfg.supervisorAgentModel;
               CODE_AGENT_MODEL = cfg.codeAgentModel;
@@ -76,6 +83,7 @@
               FLOWISE_BASE_URL = "http://localhost:3000";
               OLLAMA_BASE_URL = "http://localhost:11434";
               CHROMADB_URL = "http://localhost:8000";
+              FLOWISE_VERSION = cfg.flowiseVersion;
             };
 
             services.ollama = {
@@ -87,8 +95,6 @@
                 OLLAMA_NUM_PARALLEL = "4";
                 OLLAMA_MAX_LOADED_MODELS = "3";
               };
-
-              # Use built-in loadModels option to auto-download
               loadModels = [
                 cfg.supervisorAgentModel
                 cfg.codeAgentModel
@@ -118,64 +124,51 @@
               enable32Bit = true;
             };
 
-            virtualisation.docker = lib.mkIf cfg.gpuAcceleration {
+            virtualisation.docker = {
               enable = true;
-              enableNvidia = true;
+              enableNvidia = cfg.gpuAcceleration;
             };
 
+            # Flowise Docker service with pinned version
             systemd.services.flowise = {
-              description = "Flowise AI Flow Builder";
-              after = [ "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" ];
+              description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
+              after = [ "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
               wants = [ "network-online.target" ];
-              requires = [ "postgresql.service" "chromadb.service" "ollama.service" ];
-
-              # Add PATH with necessary build tools
-              path = with pkgs; [
-                nodejs_22
-                bash
-                coreutils
-                gcc
-                gnumake
-                python3
-                git
-              ];
+              requires = [ "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
               serviceConfig = {
                 Type = "simple";
-                User = "flowise";
-                Group = "flowise";
-                ExecStart = "${pkgs.nodejs_22}/bin/npx flowise start";
-                WorkingDirectory = "/var/lib/flowise";
-                Restart = "on-failure";
-                RestartSec = "30s";  # Wait 30s between restart attempts
-
-                Environment = [
-                  "FLOWISE_USERNAME=admin"
-                  "FLOWISE_PASSWORD=${cfg.flowisePassword}"
-                  "FLOWISE_SECRETKEY_OVERWRITE=${if cfg.flowiseSecretKey == "" then "change_me_random_secret_key" else cfg.flowiseSecretKey}"
-                  "DATABASE_TYPE=postgres"
-                  "DATABASE_HOST=/run/postgresql"
-                  "DATABASE_PORT=5432"
-                  "DATABASE_NAME=flowise"
-                  "DATABASE_USER=flowise"
-                  "OLLAMA_BASE_URL=http://localhost:11434"
-                  "CHROMADB_URL=http://localhost:8000"
-                  "SUPERVISOR_AGENT_MODEL=${cfg.supervisorAgentModel}"
-                  "CODE_AGENT_MODEL=${cfg.codeAgentModel}"
-                  "CODE_THINKING_AGENT_MODEL=${cfg.codeThinkingAgentModel}"
-                  "KNOWLEDGE_AGENT_MODEL=${cfg.knowledgeAgentModel}"
-                  # Set npm cache and install dirs
-                  "NPM_CONFIG_CACHE=/var/lib/flowise/.npm"
-                  "HOME=/var/lib/flowise"
+                ExecStartPre = [
+                  # Pull specific version
+                  "${pkgs.docker}/bin/docker pull flowiseai/flowise:${cfg.flowiseVersion}"
+                  # Clean up any existing container
+                  "-${pkgs.docker}/bin/docker rm -f flowise"
                 ];
-
-                StateDirectory = "flowise";
-                StateDirectoryMode = "0750";
-                CacheDirectory = "flowise";
-
-                # Security hardening (optional, can comment out if issues)
-                # NoNewPrivileges = true;
-                # PrivateTmp = true;
+                ExecStart = pkgs.writeShellScript "start-flowise" ''
+                  ${pkgs.docker}/bin/docker run --rm \
+                    --name flowise \
+                    --network host \
+                    -e FLOWISE_USERNAME=admin \
+                    -e FLOWISE_PASSWORD=${cfg.flowisePassword} \
+                    -e FLOWISE_SECRETKEY_OVERWRITE=${if cfg.flowiseSecretKey == "" then "change_me_random_secret_key" else cfg.flowiseSecretKey} \
+                    -e DATABASE_TYPE=postgres \
+                    -e DATABASE_HOST=localhost \
+                    -e DATABASE_PORT=5432 \
+                    -e DATABASE_NAME=flowise \
+                    -e DATABASE_USER=flowise \
+                    -e DATABASE_PASSWORD= \
+                    -e OLLAMA_BASE_URL=http://localhost:11434 \
+                    -e CHROMADB_URL=http://localhost:8000 \
+                    -e SUPERVISOR_AGENT_MODEL=${cfg.supervisorAgentModel} \
+                    -e CODE_AGENT_MODEL=${cfg.codeAgentModel} \
+                    -e CODE_THINKING_AGENT_MODEL=${cfg.codeThinkingAgentModel} \
+                    -e KNOWLEDGE_AGENT_MODEL=${cfg.knowledgeAgentModel} \
+                    -v flowise-data:/root/.flowise \
+                    flowiseai/flowise:${cfg.flowiseVersion}
+                '';
+                ExecStop = "${pkgs.docker}/bin/docker stop flowise";
+                Restart = "on-failure";
+                RestartSec = "10s";
               };
 
               wantedBy = [ "multi-user.target" ];
@@ -210,5 +203,8 @@
     {
       nixosModules.default = aiCodingAssistantModule;
       nixosModules.ai-coding-assistant = aiCodingAssistantModule;
+
+      # Export version for inspection
+      version = flowiseVersion;
     };
 }
