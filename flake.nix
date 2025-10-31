@@ -9,7 +9,6 @@
     let
       lib = nixpkgs.lib;
 
-      # Define the module once
       aiCodingAssistantModule = { config, pkgs, lib, ... }:
         let
           cfg = config.aiCodingAssistant;
@@ -78,10 +77,12 @@
               chromadb = {};
             };
 
+            # Fixed: Use host and port instead of listenAddress
             services.ollama = {
               enable = true;
               acceleration = if cfg.gpuAcceleration then "cuda" else null;
-              listenAddress = "0.0.0.0:11434";
+              host = "0.0.0.0";  # ← Changed from listenAddress
+              port = 11434;     # ← Split into separate option
               environmentVariables = {
                 OLLAMA_NUM_PARALLEL = "4";
                 OLLAMA_MAX_LOADED_MODELS = "3";
@@ -95,6 +96,12 @@
                 name = "flowise";
                 ensureDBOwnership = true;
               }];
+            };
+
+            # Fixed: Enable 32-bit support libraries for NVIDIA
+            hardware.graphics = lib.mkIf cfg.gpuAcceleration {
+              enable = true;
+              enable32Bit = true;  # ← Required for enableNvidia
             };
 
             virtualisation.docker = {
@@ -180,10 +187,7 @@
         };
     in
     {
-      # Export as default (simplest)
       nixosModules.default = aiCodingAssistantModule;
-
-      # Also export with explicit name (optional, for clarity)
       nixosModules.ai-coding-assistant = aiCodingAssistantModule;
     };
 }
