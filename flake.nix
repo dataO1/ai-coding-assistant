@@ -1,5 +1,5 @@
 {
-  description = "AI Coding Assistant Host Configuration with Configurable Options";
+  description = "AI Coding Assistant Host Configuration with Model Options";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -23,37 +23,55 @@
                 gpuAcceleration = lib.mkOption {
                   type = lib.types.bool;
                   default = true;
-                  description = "Set to false if host has no GPU or GPU acceleration should be disabled.";
+                  description = "Enable GPU acceleration for Ollama.";
                 };
                 flowisePassword = lib.mkOption {
                   type = lib.types.str;
-                  default = "changeme";  # Encourage user to override
+                  default = "changeme";
                   description = "Password for Flowise dashboard login.";
                 };
                 flowiseSecretKey = lib.mkOption {
                   type = lib.types.str;
-                  default = ""; # Empty by default, generate or override recommended
-                  description = "Secret key to secure Flowise dashboard; should be random hex string.";
+                  default = "";
+                  description = "Secret key for Flowise dashboard security.";
                 };
                 projectsFileSystemPaths = lib.mkOption {
                   type = lib.types.listOf lib.types.str;
                   default = [];
                   example = [ "/home/user/projects" ];
-                  description = ''List of host directories to be exposed as read-only bind mounts for MCP servers.
-                                  This avoids hardcoding any specific directory.
-                                  Can be extended by users or other NixOS modules.'';
+                  description = "List of directories exposed via bind mount to MCP tools.";
+                };
+
+                # New model mapping options
+                supervisorAgentModel = lib.mkOption {
+                  type = lib.types.str;
+                  default = "qwen2.5-coder:7b";
+                  description = "Model name for the Supervisor (Router) agent.";
+                };
+                codeAgentModel = lib.mkOption {
+                  type = lib.types.str;
+                  default = "qwen2.5-coder:14b";
+                  description = "Model name for the Code Expert agent (fast path).";
+                };
+                codeThinkingAgentModel = lib.mkOption {
+                  type = lib.types.str;
+                  default = "deepseek-coder:33b";
+                  description = "Model name for the Code Thinking agent (complex refactoring).";
+                };
+                knowledgeAgentModel = lib.mkOption {
+                  type = lib.types.str;
+                  default = "qwen2.5-coder:70b";
+                  description = "Model name for the Knowledge Scout agent (research and synthesis).";
                 };
               };
             };
 
             config = lib.mkIf true {
-              # Define users for services
               users.users = {
                 flowise = { isSystemUser = true; home = "/var/lib/flowise"; };
                 chromadb = { isSystemUser = true; home = "/var/lib/chromadb"; };
               };
 
-              # Ollama service with configurable GPU acceleration
               services.ollama = {
                 enable = true;
                 acceleration = if cfg.gpuAcceleration then "cuda" else "none";
@@ -64,20 +82,17 @@
                 };
               };
 
-              # PostgreSQL database service for Flowise and LangGraph
               services.postgresql = {
                 enable = true;
                 ensureDatabases = [ "flowise" ];
                 ensureUsers = [ { name = "flowise"; ensureDBOwnership = true; } ];
               };
 
-              # Docker service, GPU passthrough conditional
               virtualisation.docker = {
                 enable = true;
                 enableNvidia = cfg.gpuAcceleration;
               };
 
-              # ChromaDB service as docker container
               systemd.services.chromadb = {
                 description = "Chroma Vector Database";
                 after = [ "network-online.target" ];
@@ -93,7 +108,6 @@
                 wantedBy = [ "multi-user.target" ];
               };
 
-              # Flowise service with configurable credentials
               systemd.services.flowise = {
                 description = "Flowise AI Flow Builder";
                 after = [ "network-online.target" ];
@@ -116,6 +130,11 @@
                     "DATABASE_USER=flowise"
                     "OLLAMA_BASE_URL=http://localhost:11434"
                     "CHROMADB_URL=http://localhost:8000"
+                    # Model assignments for agents
+                    "SUPERVISOR_AGENT_MODEL=${cfg.supervisorAgentModel}"
+                    "CODE_AGENT_MODEL=${cfg.codeAgentModel}"
+                    "CODE_THINKING_AGENT_MODEL=${cfg.codeThinkingAgentModel}"
+                    "KNOWLEDGE_AGENT_MODEL=${cfg.knowledgeAgentModel}"
                   ];
                   StateDirectory = "flowise";
                   StateDirectoryMode = "0750";
@@ -123,7 +142,6 @@
                 wantedBy = [ "multi-user.target" ];
               };
 
-              # Global environment packages present for MCP tooling
               environment.systemPackages = with pkgs; [
                 nodejs_22
                 python311
@@ -138,7 +156,6 @@
                 nvtop
               ];
 
-              # Dynamic bind mounts for MCP servers based on option
               fileSystems = lib.mkMerge (map (path: {
                 key = "/mnt/agent-workspace-" + (lib.substring 0 6 (lib.baseNameOf path));
                 value = {
