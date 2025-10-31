@@ -157,33 +157,6 @@
               };
             };
 
-            # AI Agent systemd service
-            systemd.services.ai-agent-server = {
-              description = "AI Agent Server (Multi-agent Orchestrator)";
-              after = [ "ollama.service" "network-online.target" ];
-              wants = [ "network-online.target" ];
-              requires = [ "ollama.service" ];
-              wantedBy = [ "multi-user.target" ];
-
-              environment = {
-                OLLAMA_BASE_URL = "http://${cfg.ollamaHost}:${toString cfg.ollamaPort}";
-                AGENT_SERVER_PORT = toString cfg.port;
-                AI_AGENT_MANIFESTS = "%h/.config/ai-agent/manifests.json";
-                PYTHONUNBUFFERED = "1";
-              };
-
-              serviceConfig = {
-                Type = "simple";
-                ExecStart = "${aiAgentRuntime}/bin/ai-agent-server";
-                Restart = "on-failure";
-                RestartSec = "10s";
-                StartLimitBurst = 5;
-                StartLimitInterval = "60s";
-                StandardOutput = "journal";
-                StandardError = "journal";
-              };
-            };
-
             networking.firewall.allowedTCPPorts = [ cfg.port ];
 
             environment.systemPackages = with pkgs; [
