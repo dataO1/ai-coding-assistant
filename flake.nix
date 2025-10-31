@@ -56,21 +56,21 @@
               default = true;
               description = "Enable GPU acceleration for Ollama.";
             };
-          flowisePassword = lib.mkOption {
-            type = lib.types.str;
-            description = "Admain user email (acts as your username)";
-            example = "test@test.de";
-          };
+            flowisePassword = lib.mkOption {
+              type = lib.types.str;
+              description = "Admin user password for Flowise dashboard login.";
+              example = "MySecure@Pass123!";
+            };
 
-          flowiseEmail = lib.mkOption {
-            type = lib.types.str;
-            description = "Password for Flowise dashboard login.";
-            example = "MySecure@Pass123!";
-          };
+            flowiseEmail = lib.mkOption {
+              type = lib.types.str;
+              description = "Admin user email (acts as your login username).";
+              example = "admin@localhost";
+            };
 
-          # Add assertion to validate password
             flowiseSecretKey = lib.mkOption {
               type = lib.types.str;
+              default = "change_me_random_secret_key";
               description = "Secret key for Flowise dashboard security.";
             };
             flowiseVersion = lib.mkOption {
@@ -106,8 +106,8 @@
             };
             databasePassword = lib.mkOption {
               type = lib.types.str;
-              default = "flowise_default_password";
               description = "Password for Flowise PostgreSQL database user.";
+              example = "SecureDBPass123!";
             };
           };
 
@@ -137,15 +137,15 @@
 
             users.groups.flowise = {};
 
-            # Setup Flowise configs directly in home
-            system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "users" "groups" ] ''
+            # Setup Flowise configs and database workflows
+            system.activationScripts.setupFlowiseConfigs = lib.stringAfter [ "users" "groups" "postgresql" ] ''
               FLOWISE_HOME="/var/lib/flowise"
               FLOWS_DIR="$FLOWISE_HOME/flows"
               CONFIG_SOURCE="${self}/flowise-config"
-              API_KEY_FILE="/var/lib/flowise/.flowise-api-key"
 
               echo "Setting up Flowise configuration..."
 
+              # Create flows directory
               ${pkgs.coreutils}/bin/install -d -m 750 -o flowise -g flowise "$FLOWS_DIR"
 
               # Copy JSON files
@@ -155,26 +155,30 @@
                 echo "✅ Workflow JSON files copied"
               fi
 
-              # Generate API key directly in database if it doesn't exist
-              if [ ! -f "$API_KEY_FILE" ]; then
-                echo "Generating API key in database..."
+              # Import workflows directly into database
+              echo "Registering workflows in database..."
 
-                # Generate a random API key
-                API_KEY=$(${pkgs.openssl}/bin/openssl rand -hex 32)
+              for json_file in "$FLOWS_DIR"/*.json; do
+                if [ -f "$json_file" ]; then
+                  FLOW_NAME=$(basename "''${json_file%.json}")
+                  FLOW_DATA=$(${pkgs.jq}/bin/jq -c . "$json_file")
 
-                # Insert into database
-                ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
-                  INSERT INTO api_key (apiKey, "keyName", "createdDate")
-                  VALUES ('$API_KEY', 'system-init', NOW())
-                  ON CONFLICT DO NOTHING;
-            SQL
+                  # Escape single quotes for SQL
+                  FLOW_DATA_ESCAPED=$(echo "$FLOW_DATA" | sed "s/'/''/g")
 
-                echo "$API_KEY" > "$API_KEY_FILE"
-                chmod 600 "$API_KEY_FILE"
-                chown flowise:flowise "$API_KEY_FILE"
-                echo "✅ API key created: $API_KEY_FILE"
-              fi
+                  # Insert into database
+                  ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -d flowise << SQL 2>/dev/null || true
+                    INSERT INTO chat_flow (name, "flowData", "createdDate", "updatedDate")
+                    VALUES ('$FLOW_NAME', '$FLOW_DATA_ESCAPED', NOW(), NOW())
+                    ON CONFLICT (name) DO UPDATE SET
+                      "flowData" = EXCLUDED."flowData",
+                      "updatedDate" = NOW();
+              SQL
+                  echo "✅ Registered: $FLOW_NAME"
+                fi
+              done
             '';
+
             environment.sessionVariables = {
               SUPERVISOR_AGENT_MODEL = cfg.supervisorAgentModel;
               CODE_AGENT_MODEL = cfg.codeAgentModel;
@@ -204,7 +208,6 @@
               ];
             };
 
-            # Update PostgreSQL configuration
             services.postgresql = {
               enable = true;
               ensureDatabases = [ "flowise" ];
@@ -213,7 +216,6 @@
                 ensureDBOwnership = true;
               }];
 
-              # Enable password authentication for localhost
               authentication = lib.mkOverride 10 ''
                 local all all peer
                 host flowise flowise 127.0.0.1/32 scram-sha-256
@@ -237,13 +239,10 @@
               enableNvidia = cfg.gpuAcceleration;
             };
 
-            # Add activation script to set PostgreSQL password
             system.activationScripts.setFlowisePassword = lib.stringAfter [ "users" ] ''
-              # Set password for flowise user
               ${pkgs.sudo}/bin/sudo -u postgres ${config.services.postgresql.package}/bin/psql -c "ALTER USER flowise WITH PASSWORD '${cfg.databasePassword}';" || true
             '';
 
-            # Add this service before the flowise service
             systemd.services.flowise-image-pull = {
               description = "Pre-pull Flowise Docker Image";
               after = [ "docker.service" ];
@@ -253,13 +252,13 @@
               serviceConfig = {
                 Type = "oneshot";
                 RemainAfterExit = true;
-                TimeoutStartSec = "10min";  # Generous timeout for slow connections
+                TimeoutStartSec = "10min";
                 ExecStart = "${pkgs.docker}/bin/docker pull flowiseai/flowise:${cfg.flowiseVersion}";
               };
             };
 
             systemd.services.flowise-init = {
-              description = "Initialize Flowise Admin Account and Import Workflows";
+              description = "Initialize Flowise Admin Account";
               after = [ "flowise.service" ];
               requires = [ "flowise.service" ];
               wantedBy = [ "multi-user.target" ];
@@ -273,8 +272,6 @@
                   FLOWISE_ADMIN_USER="admin"
                   FLOWISE_ADMIN_PASS="${cfg.flowisePassword}"
                   FLOWISE_EMAIL="${cfg.flowiseEmail}"
-                  FLOWS_DIR="/var/lib/flowise/flows"
-                  API_KEY_FILE="/var/lib/flowise/.flowise-api-key"
 
                   echo "Waiting for Flowise to start..."
                   for i in {1..60}; do
@@ -302,43 +299,8 @@
                         \"password\": \"$FLOWISE_ADMIN_PASS\"
                       }" >/dev/null
                     echo "✅ Admin account created"
-                    sleep 2
                   else
                     echo "✅ Admin account already exists"
-                  fi
-
-                  # Import workflows using stored API key
-                  if [ -f "$API_KEY_FILE" ]; then
-                    API_KEY=$(cat "$API_KEY_FILE")
-                    echo "Importing workflows using API key..."
-
-                    if [ -d "$FLOWS_DIR" ]; then
-                      for json_file in "$FLOWS_DIR"/*.json; do
-                        if [ -f "$json_file" ]; then
-                          filename=$(basename "$json_file")
-                          echo "Importing $filename..."
-
-                          RESPONSE=$(${pkgs.curl}/bin/curl -s -X POST "$FLOWISE_URL/api/v1/flows" \
-                            -H "Authorization: Bearer $API_KEY" \
-                            -H "Content-Type: application/json" \
-                            -d @"$json_file")
-
-                          if echo "$RESPONSE" | ${pkgs.jq}/bin/jq . >/dev/null 2>&1; then
-                            ID=$(echo "$RESPONSE" | ${pkgs.jq}/bin/jq -r '.id // empty')
-                            if [ -n "$ID" ]; then
-                              echo "✅ Imported: $filename (ID: $ID)"
-                            else
-                              echo "⚠️  Import response unclear for $filename: $RESPONSE"
-                            fi
-                          else
-                            echo "⚠️  Failed to import $filename"
-                          fi
-                        fi
-                      done
-                      echo "✅ Workflow import complete"
-                    fi
-                  else
-                    echo "⚠️  API key file not found"
                   fi
 
                   echo "✅ Flowise initialization complete"
@@ -346,10 +308,9 @@
               };
             };
 
-            # Flowise Docker service with pinned version
             systemd.services.flowise = {
               description = "Flowise AI Flow Builder (Docker v${cfg.flowiseVersion})";
-              after = ["flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
+              after = [ "flowise-image-pull.service" "network-online.target" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
               wants = [ "network-online.target" ];
               requires = [ "flowise-image-pull.service" "postgresql.service" "chromadb.service" "ollama.service" "docker.service" ];
 
