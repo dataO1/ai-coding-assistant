@@ -160,7 +160,7 @@
 
               for json_file in "$FLOWS_DIR"/*.json; do
                 if [ -f "$json_file" ]; then
-                  FLOW_NAME=$(basename "\'\'${json_file%.json}")
+                  FLOW_NAME=$(basename "${json_file%.json}")
                   FLOW_DATA=$(${pkgs.jq}/bin/jq -c . "$json_file")
 
                   # Escape single quotes for SQL
