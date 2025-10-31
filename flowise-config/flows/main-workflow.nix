@@ -1,4 +1,4 @@
-{ agents, models, urls, lib }:
+{ agents, models, urls, lib, flowiseLib }:
 
 let
   chatInput = {

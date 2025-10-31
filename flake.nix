@@ -26,7 +26,7 @@
         in
         import ./flowise-config/flows/main-workflow.nix {
           inherit agents models urls lib;
-          lib = flowiseConfigLib;
+          flowiseLib = flowiseConfigLib;
         };
 
       aiCodingAssistantModule = { config, pkgs, lib, ... }:
