@@ -179,6 +179,7 @@ EOF
 
           pipelineModule = lib.types.submodule {
             options = {
+              name = lib.mkOption { type = lib.types.str; };
               description = lib.mkOption { type = lib.types.str; };
               model = lib.mkOption { type = lib.types.str; };
               requiredTools = lib.mkOption { type = lib.types.listOf lib.types.str; default = []; };
