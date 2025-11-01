@@ -101,7 +101,7 @@ EOF
 
               port = lib.mkOption {
                 type = lib.types.port;
-                default = 8080;
+                default = 3000;
                 description = "Agent server port";
               };
 
@@ -198,7 +198,7 @@ EOF
             enable = lib.mkEnableOption "AI Agent user configuration";
             serverUrl = lib.mkOption {
               type = lib.types.str;
-              default = "http://localhost:8080";
+              default = "http://localhost:3000";
             };
             pipelines = lib.mkOption {
               type = lib.types.attrsOf pipelineModule;
@@ -244,7 +244,7 @@ EOF
 
                 Environment = [
                   "OLLAMA_BASE_URL=http://localhost:11434"
-                  "AGENT_SERVER_PORT=${cfg.port}"
+                  "AGENT_SERVER_PORT=3000"
                   "AI_AGENT_MANIFESTS=%h/.config/ai-agent/manifests.json"
                   "PYTHONUNBUFFERED=1"
                 ];
