@@ -244,7 +244,7 @@ EOF
 
                 Environment = [
                   "OLLAMA_BASE_URL=http://localhost:11434"
-                  "AGENT_SERVER_PORT=8080"
+                  "AGENT_SERVER_PORT=${cfg.port}"
                   "AI_AGENT_MANIFESTS=%h/.config/ai-agent/manifests.json"
                   "PYTHONUNBUFFERED=1"
                 ];
