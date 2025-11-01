@@ -7,18 +7,9 @@ let
     options = {
       description = lib.mkOption { type = lib.types.str; };
       model = lib.mkOption { type = lib.types.str; };
-      requiredTools = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [];
-      };
-      optionalTools = lib.mkOption {
-        type = lib.types.listOf lib.types.str;
-        default = [];
-      };
-      fallbackMode = lib.mkOption {
-        type = lib.types.enum [ "degrade" "fail" ];
-        default = "degrade";
-      };
+      requiredTools = lib.mkOption { type = lib.types.listOf lib.types.str; default = []; };
+      optionalTools = lib.mkOption { type = lib.types.listOf lib.types.str; default = []; };
+      fallbackMode = lib.mkOption { type = lib.types.enum [ "degrade" "fail" ]; default = "degrade"; };
       systemPrompt = lib.mkOption { type = lib.types.str; };
       contexts = lib.mkOption {
         type = lib.types.listOf (lib.types.enum [ "nvim" "vscode" "shell" "web" ]);
@@ -42,7 +33,7 @@ in
     enableUserService = lib.mkOption {
       type = lib.types.bool;
       default = true;
-      description = "Run AI Agent as user systemd service (recommended)";
+      description = "Run AI Agent as user systemd service";
     };
     neovimIntegration = lib.mkOption { type = lib.types.bool; default = true; };
     vscodeIntegration = lib.mkOption { type = lib.types.bool; default = true; };
@@ -55,37 +46,40 @@ in
       pipelines = cfg.pipelines;
     };
 
-    # Set environment variable (for shell usage)
+    # Environment variables
     home.sessionVariables = {
       AI_AGENT_MANIFESTS = "${config.home.homeDirectory}/.config/ai-agent/manifests.json";
       AI_AGENT_SERVER_URL = cfg.serverUrl;
     };
 
-    # User-level systemd service (optional - runs as user, not system-wide)
+    # User systemd service
     systemd.user.services.ai-agent-server = lib.mkIf cfg.enableUserService {
       Unit = {
         Description = "AI Agent Server (user service)";
         After = [ "network-online.target" ];
-        Wants = [ "network-online.target" ];
       };
 
       Service = {
         Type = "simple";
-        ExecStart = "${pkgs.lib.getExe pkgs.ai-agent-runtime}";
+        # Use absolute path from environment or assume system install
+        ExecStart = "${pkgs.bash}/bin/bash -c 'ai-agent-server'";
         Restart = "on-failure";
         RestartSec = "10s";
+
         Environment = [
+          "PATH=${pkgs.lib.makeBinPath [ pkgs.python311 pkgs.bash ]}"
           "OLLAMA_BASE_URL=http://localhost:11434"
           "AGENT_SERVER_PORT=8080"
-          "AI_AGENT_MANIFESTS=%h/.config/ai-agent/manifests.json"
+          "AI_AGENT_MANIFESTS=${config.home.homeDirectory}/.config/ai-agent/manifests.json"
           "PYTHONUNBUFFERED=1"
         ];
       };
 
-      Install.WantedBy = [ "default.target" ];
+      Install = {
+        WantedBy = [ "default.target" ];
+      };
     };
 
-    # CLI wrapper
     home.file.".local/bin/ai".source = pkgs.writeShellScript "ai-cli" ''
       #!/usr/bin/env bash
       AGENT_URL="''${AI_AGENT_SERVER_URL:-http://localhost:8080}"
@@ -104,7 +98,6 @@ in
         ${pkgs.jq}/bin/jq -r '.response // .error'
     '';
 
-    # Shell aliases
     home.shellAliases = lib.mkIf cfg.shellIntegration {
       ai = "ai supervisor";
       ai-code = "ai code-expert";
