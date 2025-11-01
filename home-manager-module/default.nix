@@ -52,7 +52,6 @@ in
       AI_AGENT_SERVER_URL = cfg.serverUrl;
     };
 
-    # User systemd service
     systemd.user.services.ai-agent-server = lib.mkIf cfg.enableUserService {
       Unit = {
         Description = "AI Agent Server (user service)";
@@ -61,16 +60,17 @@ in
 
       Service = {
         Type = "simple";
-        # Use absolute path from environment or assume system install
-        ExecStart = "${pkgs.bash}/bin/bash -c 'ai-agent-server'";
+
+        # Use absolute path to ai-agent-server binary from package
+        ExecStart = "${pkgs.ai-agent-runtime}/bin/ai-agent-server";
+
         Restart = "on-failure";
         RestartSec = "10s";
 
         Environment = [
-          "PATH=${pkgs.lib.makeBinPath [ pkgs.python311 pkgs.bash ]}"
           "OLLAMA_BASE_URL=http://localhost:11434"
           "AGENT_SERVER_PORT=8080"
-          "AI_AGENT_MANIFESTS=${config.home.homeDirectory}/.config/ai-agent/manifests.json"
+          "AI_AGENT_MANIFESTS=%h/.config/ai-agent/manifests.json"
           "PYTHONUNBUFFERED=1"
         ];
       };
@@ -79,7 +79,6 @@ in
         WantedBy = [ "default.target" ];
       };
     };
-
     home.file.".local/bin/ai".source = pkgs.writeShellScript "ai-cli" ''
       #!/usr/bin/env bash
       AGENT_URL="''${AI_AGENT_SERVER_URL:-http://localhost:8080}"
