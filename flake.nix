@@ -62,12 +62,16 @@ EOF
 
       devShells.${system}.default = let
         pkgs = nixpkgs.legacyPackages.${system};
+        aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
       in
       pkgs.mkShell {
         buildInputs = with pkgs; [
           pythonEnv
           nodejs_22
           git
+        ];
+        packages = [
+          aiAgentRuntime
         ];
 
         # set env variables

@@ -75,26 +75,6 @@ class MultiAgentOrchestrator:
         )
         return state
 
-    async def classifynodewrapper(self, statedict):
-        state = OrchestratorState(**statedict)
-        result = await self.classifytask(state)
-        return self._dataclass_to_dict(result)
-
-    async def codenodewrapper(self, statedict):
-        state = OrchestratorState(**statedict)
-        result = await self.executecodeexpert(state)
-        return self._dataclass_to_dict(result)
-
-    async def knowledgenodewrapper(self, statedict):
-        state = OrchestratorState(**statedict)
-        result = await self.executeknowledgescout(state)
-        return self._dataclass_to_dict(result)
-
-    def composenodewrapper(self, statedict):
-        state = OrchestratorState(**statedict)
-        result = self.composeresponse(state)
-        return self._dataclass_to_dict(result)
-
     def routeafterclassification(self, state: OrchestratorState):
         # Simplified routing example
         if state.classification.lower() == "codetask":
@@ -104,7 +84,7 @@ class MultiAgentOrchestrator:
         else:
             return "compose"
 
-     @staticmethod
+    @staticmethod
     def _dataclass_to_dict(obj: OrchestratorState) -> Dict[str, Any]:
         """Convert OrchestratorState dataclass to dict for LangGraph."""
         return {
@@ -121,13 +101,11 @@ class MultiAgentOrchestrator:
         }
 
     def buildgraph(self) -> StateGraph:
-        # graphbuilder = StateGraph[dict]()
-
         graphbuilder = StateGraph(OrchestratorState)
-        graphbuilder.add_node("classify", self.classifynodewrapper)
-        graphbuilder.add_node("codeexpert", self.codenodewrapper)
-        graphbuilder.add_node("knowledgescout", self.knowledgenodewrapper)
-        graphbuilder.add_node("compose", self.composenodewrapper)
+        graphbuilder.add_node("classify", self.classifytask)
+        graphbuilder.add_node("codeexpert", self.executecodeexpert)
+        graphbuilder.add_node("knowledgescout", self.executeknowledgescout)
+        graphbuilder.add_node("compose", self.composeresponse)
 
         graphbuilder.add_edge(START, "classify")
 
