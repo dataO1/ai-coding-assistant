@@ -6,7 +6,7 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, lib, flake-utils, ... }:
+  outputs = { self, nixpkgs, flake-utils, ... }:
   let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -70,8 +70,7 @@
           echo "install python deps with: pip install langchain langchain-community langchain-openai fastapi uvicorn pydantic langgraph"
         '';
       };
-    }) //
-    {
+
       # ========================================================================
       # NixOS Module (top-level exports)
       # ========================================================================
@@ -184,5 +183,6 @@
     homeManagerModules.default = (import ./home-manager-module/default.nix) {
       inherit pkgs lib aiAgentRuntime;
     };
-  };
+
+  });
 }
