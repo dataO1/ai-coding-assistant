@@ -12,6 +12,10 @@
       pkgs = nixpkgs.legacyPackages.${system};
       lib = nixpkgs.lib;
 
+      agent-shell = pkgs.writeShellScriptBin "agent" (
+        builtins.readFile ./ai-agent-runtime/scripts/agent.sh
+      );
+
       # Python environment for the runtime
       pythonEnv = pkgs.python311.withPackages (ps: with ps; [
         langchain
@@ -40,11 +44,11 @@
 
           # Create launcher script
           cat > $out/bin/ai-agent-server << EOF
-#!/usr/bin/env bash
-export PYTHONPATH="$out/lib:\$PYTHONPATH"
-cd "$out/lib/ai-agent-runtime"
-exec ${pythonEnv}/bin/python -m ai_agent_runtime.server "\$@"
-EOF
+          #!/usr/bin/env bash
+          export PYTHONPATH="$out/lib:\$PYTHONPATH"
+          cd "$out/lib/ai-agent-runtime"
+          exec ${pythonEnv}/bin/python -m ai_agent_runtime.server "\$@"
+          EOF
           chmod +x $out/bin/ai-agent-server
         '';
       };
@@ -70,15 +74,18 @@ EOF
           nodejs_22
           git
         ];
-        packages = [
-          aiAgentRuntime
-        ];
-
         # set env variables
         OLLAMA_BASE_URL=http://localhost:11434;
         AGENT_SERVER_PORT=3000;
+
+        AI_AGENT_SERVER_URL = "http://0.0.0.0:3000";
         # AI_AGENT_MANIFESTS=%h/.config/ai-agent/manifests.json;
         PYTHONUNBUFFERED=1;
+        packages = [
+          aiAgentRuntime
+          agent-shell
+        ];
+
 
         shellHook = ''
           echo "Install Python deps with: pip install langchain langchain-community langchain-openai fastapi uvicorn pydantic langgraph"
@@ -270,30 +277,13 @@ EOF
                 WantedBy = [ "default.target" ];
               };
             };
-            home.file.".local/bin/ai".source = pkgs.writeShellScript "ai-cli" ''
-              #!/usr/bin/env bash
-              AGENT_URL="''${AI_AGENT_SERVER_URL:-http://localhost:3000}"
-              PIPELINE="''${1:-supervisor}"
-              QUERY="''${@:2}"
-
-              if [ -z "$QUERY" ]; then
-                echo "Usage: ai [pipeline] <query...>"
-                curl -s "$AGENT_URL/api/pipelines" 2>/dev/null | ${pkgs.jq}/bin/jq -r '.[] | "  \(.name): \(.description)"' || true
-                exit 1
-              fi
-
-              curl -s -X POST "$AGENT_URL/api/query" \
-                -H "Content-Type: application/json" \
-                -d "{\"query\": \"$QUERY\", \"context\": \"shell\", \"pipeline\": \"$PIPELINE\"}" | \
-                ${pkgs.jq}/bin/jq -r '.response // .error'
-            '';
-
+            home.file.".local/bin/agent".source = agent-shell;
             home.shellAliases = lib.mkIf cfg.shellIntegration {
-              ai = "ai supervisor";
-              ai-code = "ai code-expert";
-              ai-research = "ai knowledge-scout";
-              ai-refactor = "ai refactoring";
-              ai-debug = "ai debug";
+              agent = "agent supervisor";
+              agent-code = "agent code-expert";
+              agent-research = "agent knowledge-scout";
+              agent-refactor = "agent refactoring";
+              agent-debug = "agent debug";
             };
 
             home.packages = with pkgs; [ curl jq ];
