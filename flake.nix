@@ -80,9 +80,8 @@
         let
           cfg = config.services.aiAgent;
 
-          inherit system;
+          inherit system lib;
           pkgs = nixpkgs.legacyPackages.${system};
-          lib = nixpkgs.lib;
           aiAgentRuntime = self.packages.${pkgs.system}.ai-agent-runtime;
         in
         {
