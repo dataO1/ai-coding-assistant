@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 AGENT_URL="''${AI_AGENT_SERVER_URL:-http://localhost:3000}"
 PIPELINE="''${1:-supervisor}"
-QUERY="''${*:2}"
+QUERY="''${@:2}"
 
 if [ -z "$QUERY" ]; then
 echo "Usage: ai [pipeline] <query...>"
