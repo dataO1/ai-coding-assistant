@@ -1,26 +1,34 @@
-import asyncio
-import logging
 from pydantic import BaseModel, Field
 from typing import Dict, Any
-from dataclasses import dataclass, field
+from dataclasses import dataclass, fields
 from langgraph.graph import StateGraph, START, END
 from ai_agent_runtime.agents import AgentManifest, SupervisorAgent, CodeExpertAgent, KnowledgeScoutAgent
 from ai_agent_runtime.utils import get_logger
+from ai_agent_runtime.agents import AgentOutput
 
 logger = get_logger(__name__)
 
-@dataclass
+
 class OrchestratorState(BaseModel):
-    query: str
+    query: str = ""
     context: str = "shell"
     classification: str = ""
     classificationreasoning: str = ""
     codeexpertresult: str = ""
     knowledgeresult: str = ""
     finalresponse: str = ""
-    toolsused: list = field(default_factory=list)
-    executionpath: list = field(default_factory=list)
-    errors: list = field(default_factory=list)
+    toolsused: list = Field(default_factory=list)
+    executionpath: list = Field(default_factory=list)
+    errors: list = Field(default_factory=list)
+
+    class Config:
+        frozen = False
+
+    def update(self,output: AgentOutput ):
+        for field in fields(output):
+            if hasattr(self, field.name):
+                # Shallow copy the value
+                setattr(self, field.name, getattr(output, field.name))
 
 
 class MultiAgentOrchestrator:
@@ -28,108 +36,143 @@ class MultiAgentOrchestrator:
         self.ollamaurl = ollamaurl
         self.pipelinemanifests = pipelinemanifests
         self.agents = self.initializeagents()
+        self.graph = self.buildgraph()
         logger.info(f"Initialized orchestrator with agents: {list(self.agents.keys())}")
 
     def initializeagents(self) -> Dict[str, Any]:
         agents = {}
         supervisormanifest = self.pipelinemanifests.get("supervisor")
         if supervisormanifest:
-            agents["supervisor"] = SupervisorAgent(manifest=AgentManifest(**supervisormanifest), ollama_url=self.ollamaurl)
+            agents["supervisor"] = SupervisorAgent(
+                manifest=AgentManifest(**supervisormanifest),
+                ollama_url=self.ollamaurl
+            )
         codemanifest = self.pipelinemanifests.get("code-expert")
         if codemanifest:
-            agents["codeexpert"] = CodeExpertAgent(manifest=AgentManifest(**codemanifest), ollama_url=self.ollamaurl)
+            agents["codeexpert"] = CodeExpertAgent(
+                manifest=AgentManifest(**codemanifest),
+                ollama_url=self.ollamaurl
+            )
         knowledgemanifest = self.pipelinemanifests.get("knowledge-scout")
         if knowledgemanifest:
-            agents["knowledgescout"] = KnowledgeScoutAgent(manifest=AgentManifest(**knowledgemanifest), ollama_url=self.ollamaurl)
+            agents["knowledgescout"] = KnowledgeScoutAgent(
+                manifest=AgentManifest(**knowledgemanifest),
+                ollama_url=self.ollamaurl
+            )
         if not agents:
             logger.warning("No agents initialized from manifests")
         return agents
 
     async def classifytask(self, state: OrchestratorState) -> OrchestratorState:
-        # Calls supervisor asynchronously and updates state accordingly
-        supervisor: SupervisorAgent = self.agents["supervisor"]
-        output = await supervisor.process(state.query, state.context)
-        state.classification = output.content
-        # Assume reasoning parsing done inside
-        state.classificationreasoning = output.reasoning
-        return state
+        try:
+            supervisor: SupervisorAgent = self.agents["supervisor"]
+            output = await supervisor.process(state.query, state.context)
 
-    async def executecodeexpert(self, state: OrchestratorState) -> OrchestratorState:
-        agent: CodeExpertAgent = self.agents["codeexpert"]
-        output = await agent.process(state.query, state.context)
-        state.codeexpertresult = output.content
-        return state
+            state.classification = output.content
+            state.classificationreasoning = output.reasoning
+            state.update(output)
+            state.executionpath.append("classify")
+
+            logger.info(f"Classification: {state.classification}")
+            return state
+        except Exception as e:
+            logger.error(f"Classification error: {e}", exc_info=True)
+            return state
+
+    async def executecodeexpert(self,state: OrchestratorState) -> OrchestratorState:
+        try:
+            agent: CodeExpertAgent = self.agents["codeexpert"]
+            output = await agent.process(state.query, state.context)
+
+            state.codeexpertresult = output.content
+            state.update(output)
+            state.executionpath.append("codeexpert")
+
+            return state
+        except Exception as e:
+            logger.error(f"Code expert error: {e}", exc_info=True)
+            return state
 
     async def executeknowledgescout(self, state: OrchestratorState) -> OrchestratorState:
-        agent: KnowledgeScoutAgent = self.agents["knowledgescout"]
-        output = await agent.process(state.query, state.context)
-        state.knowledgeresult = output.content
-        return state
+        try:
+            agent: KnowledgeScoutAgent = self.agents["knowledgescout"]
+            output = await agent.process(state.query, state.context)
+
+            state.knowledgeresult = output.content
+            state.update(output)
+            state.executionpath.append("knowledgescout")
+
+            return state
+        except Exception as e:
+            logger.error(f"Knowledge scout error: {e}", exc_info=True)
+            return state
 
     def composeresponse(self, state: OrchestratorState) -> OrchestratorState:
-        # Synchronous composition (could be async if needed)
-        state.finalresponse = (
-            f"Classification: {state.classification}\n"
-            f"Code Expert Result: {state.codeexpertresult}\n"
-            f"Knowledge Scout Result: {state.knowledgeresult}"
-        )
+        response_parts = []
+        if state.classification:
+            response_parts.append(f"Classification: {state.classification}")
+        if state.codeexpertresult:
+            response_parts.append(f"Code Expert: {state.codeexpertresult}")
+        if state.knowledgeresult:
+            response_parts.append(f"Knowledge Scout: {state.knowledgeresult}")
+
+        state.finalresponse = "\n".join(response_parts) if response_parts else "No response generated."
+        state.executionpath.append("compose")
+
         return state
 
-    def routeafterclassification(self, state: OrchestratorState):
-        # Simplified routing example
-        if state.classification.lower() == "codetask":
+    def route_on_classification(self, state: OrchestratorState) -> str:
+        """Route based on classification in executionpath logic."""
+        classification = state.classification.lower()
+
+        if "code" in classification:
             return "codeexpert"
-        elif state.classification.lower() == "researtask":
+        elif "research" in classification or "knowledge" in classification:
             return "knowledgescout"
         else:
             return "compose"
 
-    @staticmethod
-    def _dataclass_to_dict(obj: OrchestratorState) -> Dict[str, Any]:
-        """Convert OrchestratorState dataclass to dict for LangGraph."""
-        return {
-            "query": obj.query,
-            "context": obj.context,
-            "classification": obj.classification,
-            "classificationreasoning": obj.classificationreasoning,
-            "codeexpertresult": obj.codeexpertresult,
-            "knowledgeresult": obj.knowledgeresult,
-            "finalresponse": obj.finalresponse,
-            "toolsused": obj.toolsused,
-            "executionpath": obj.executionpath,
-            "errors": obj.errors,
-        }
-
-    def buildgraph(self) -> StateGraph:
+    def buildgraph(self):
+        """Build fixed state graph."""
         graphbuilder = StateGraph(OrchestratorState)
+
         graphbuilder.add_node("classify", self.classifytask)
         graphbuilder.add_node("codeexpert", self.executecodeexpert)
         graphbuilder.add_node("knowledgescout", self.executeknowledgescout)
         graphbuilder.add_node("compose", self.composeresponse)
 
         graphbuilder.add_edge(START, "classify")
-
         graphbuilder.add_conditional_edges(
             "classify",
-            lambda state: [self.routeafterclassification(OrchestratorState(**state))],
-            ["codeexpert", "knowledgescout", "compose"]
-         )
-
+            self.route_on_classification,
+            {
+                "codeexpert": "codeexpert",
+                "knowledgescout": "knowledgescout",
+                "compose": "compose",
+            }
+        )
         graphbuilder.add_edge("codeexpert", "compose")
         graphbuilder.add_edge("knowledgescout", "compose")
         graphbuilder.add_edge("compose", END)
+
         return graphbuilder.compile()
 
     async def execute(self, query: str, context: str = "shell") -> Dict[str, Any]:
-        logger.info(f"Starting orchestration query={query[:50]}, context={context}")
-        initial_state = OrchestratorState(query=query, context=context)
-        graph = self.buildgraph()
+        logger.info(f"Starting orchestration for query={query[:60]}, context={context}")
 
         try:
-            # Async LangGraph pipeline execution
-            result = await graph.ainvoke(initial_state)
-            logger.info(f"Orchestration complete. Result: {str(result)}")
-            return result
+            result = await self.graph.ainvoke(OrchestratorState())
+            logger.info(f"Orchestration complete. Path: {result.get('executionpath', [])}")
+
+            return {
+                "query": query,
+                "context": context,
+                "response": result.get("finalresponse", "No response generated."),
+                "classification": result.get("classification", ""),
+                "toolsused": list(set(result.get("toolsused", []))),
+                "executionpath": result.get("executionpath", []),
+                "errors": result.get("errors", []),
+            }
         except Exception as e:
             logger.error(f"Orchestration error: {e}", exc_info=True)
             return {
