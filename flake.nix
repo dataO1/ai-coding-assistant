@@ -175,7 +175,7 @@ EOF
           system = "x86_64-linux";
           pkgs = nixpkgs.legacyPackages.${system};
           lib = nixpkgs.lib;
-          aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
+          aiAgentRuntime = self.packages.ai-agent-runtime;
 
           pipelineModule = lib.types.submodule {
             options = {
