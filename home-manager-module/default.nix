@@ -2,6 +2,8 @@
 
 let
   cfg = config.programs.aiAgent;
+  inherit system;
+  aiAgentRuntime = pkgs.legacyPackages.${system}.ai-agent-runtime;
 
   pipelineModule = lib.types.submodule {
     options = {
@@ -62,7 +64,7 @@ in
         Type = "simple";
 
         # Use absolute path to ai-agent-server binary from package
-        ExecStart = "${pkgs.ai-agent-runtime}/bin/ai-agent-server";
+        ExecStart = "${aiAgentRuntime}/bin/ai-agent-server";
 
         Restart = "on-failure";
         RestartSec = "10s";
