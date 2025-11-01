@@ -169,7 +169,8 @@ EOF
           };
       };
 
-      homeManagerModules.default = { config, lib, pkgs, ... }:
+      homeManagerModules = {
+        default = { config, lib, pkgs, ... }:
         let
           cfg = config.programs.aiAgent;
           system = "x86_64-linux";
@@ -282,5 +283,6 @@ EOF
             home.packages = with pkgs; [ curl jq ];
           };
         };
+      };
     };
 }
