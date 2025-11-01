@@ -74,7 +74,7 @@ EOF
         default = { config, pkgs, lib, ... }:
           let
             system = config.system;
-            aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
+            aiAgentRuntime = self.packages.ai-agent-runtime;
             cfg = config.services.aiAgent;
           in
           {
