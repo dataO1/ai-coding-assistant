@@ -7,8 +7,8 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, ... }:
+    flake-utils.lib.eachDefaultSystem (system:
   let
-      system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       # Python environment for the runtime
       pythonEnv = pkgs: pkgs.python311.withPackages (ps: with ps; [
@@ -21,37 +21,32 @@
         pydantic-settings
         langgraph
       ]);
-    in
-    flake-utils.lib.eachDefaultSystem (system:
-    let
-        inherit system;
-        pkgs = nixpkgs.legacyPackages.${system};
-        lib = nixpkgs.lib;
+      lib = nixpkgs.lib;
 
-        # Build the runtime package
-        aiAgentRuntime = pkgs.stdenv.mkDerivation {
-          name = "ai-agent-runtime";
-          src = ./ai-agent-runtime;
+      # Build the runtime package
+      aiAgentRuntime = pkgs.stdenv.mkDerivation {
+        name = "ai-agent-runtime";
+        src = ./ai-agent-runtime;
 
-          buildInputs = [ (pythonEnv pkgs) ];
+        buildInputs = [ (pythonEnv pkgs) ];
 
-          installPhase = ''
-            mkdir -p $out/lib
-            mkdir -p $out/bin
+        installPhase = ''
+          mkdir -p $out/lib
+          mkdir -p $out/bin
 
-            # Copy entire ai-agent-runtime as a package
-            cp -r . $out/lib/ai-agent-runtime
+          # Copy entire ai-agent-runtime as a package
+          cp -r . $out/lib/ai-agent-runtime
 
-            # Create launcher script
-            cat > $out/bin/ai-agent-server << EOF
-            #!/usr/bin/env bash
-            export PYTHONPATH="$out/lib:\$PYTHONPATH"
-            cd "$out/lib/ai-agent-runtime"
-            exec ${(pythonEnv pkgs)}/bin/python -m ai_agent_runtime.server "\$@"
-            EOF
-            chmod +x $out/bin/ai-agent-server
-          '';
-        };
+          # Create launcher script
+          cat > $out/bin/ai-agent-server << EOF
+          #!/usr/bin/env bash
+          export PYTHONPATH="$out/lib:\$PYTHONPATH"
+          cd "$out/lib/ai-agent-runtime"
+          exec ${(pythonEnv pkgs)}/bin/python -m ai_agent_runtime.server "\$@"
+          EOF
+          chmod +x $out/bin/ai-agent-server
+        '';
+      };
       in
       {
         # Export the runtime package
