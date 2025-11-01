@@ -1,5 +1,6 @@
 import asyncio
 import logging
+from pydantic import BaseModel, Field
 from typing import Dict, Any
 from dataclasses import dataclass, field
 from langgraph.graph import StateGraph, START, END
@@ -9,7 +10,7 @@ from ai_agent_runtime.utils import get_logger
 logger = get_logger(__name__)
 
 @dataclass
-class OrchestratorState:
+class OrchestratorState(BaseModel):
     query: str
     context: str = "shell"
     classification: str = ""
@@ -20,6 +21,7 @@ class OrchestratorState:
     toolsused: list = field(default_factory=list)
     executionpath: list = field(default_factory=list)
     errors: list = field(default_factory=list)
+
 
 class MultiAgentOrchestrator:
     def __init__(self, ollamaurl: str, pipelinemanifests: Dict[str, Dict[str, Any]]):
@@ -76,22 +78,22 @@ class MultiAgentOrchestrator:
     async def classifynodewrapper(self, statedict):
         state = OrchestratorState(**statedict)
         result = await self.classifytask(state)
-        return result.__dict__
+        return self._dataclass_to_dict(result)
 
     async def codenodewrapper(self, statedict):
         state = OrchestratorState(**statedict)
         result = await self.executecodeexpert(state)
-        return result.__dict__
+        return self._dataclass_to_dict(result)
 
     async def knowledgenodewrapper(self, statedict):
         state = OrchestratorState(**statedict)
         result = await self.executeknowledgescout(state)
-        return result.__dict__
+        return self._dataclass_to_dict(result)
 
     def composenodewrapper(self, statedict):
         state = OrchestratorState(**statedict)
         result = self.composeresponse(state)
-        return result.__dict__
+        return self._dataclass_to_dict(result)
 
     def routeafterclassification(self, state: OrchestratorState):
         # Simplified routing example
@@ -102,10 +104,26 @@ class MultiAgentOrchestrator:
         else:
             return "compose"
 
+     @staticmethod
+    def _dataclass_to_dict(obj: OrchestratorState) -> Dict[str, Any]:
+        """Convert OrchestratorState dataclass to dict for LangGraph."""
+        return {
+            "query": obj.query,
+            "context": obj.context,
+            "classification": obj.classification,
+            "classificationreasoning": obj.classificationreasoning,
+            "codeexpertresult": obj.codeexpertresult,
+            "knowledgeresult": obj.knowledgeresult,
+            "finalresponse": obj.finalresponse,
+            "toolsused": obj.toolsused,
+            "executionpath": obj.executionpath,
+            "errors": obj.errors,
+        }
+
     def buildgraph(self) -> StateGraph:
         # graphbuilder = StateGraph[dict]()
 
-        graphbuilder = StateGraph(dict)
+        graphbuilder = StateGraph(OrchestratorState)
         graphbuilder.add_node("classify", self.classifynodewrapper)
         graphbuilder.add_node("codeexpert", self.codenodewrapper)
         graphbuilder.add_node("knowledgescout", self.knowledgenodewrapper)
@@ -131,17 +149,9 @@ class MultiAgentOrchestrator:
 
         try:
             # Async LangGraph pipeline execution
-            result = await graph.ainvoke(initial_state.__dict__)
-            logger.info(f"Orchestration complete. Execution path: {result.get_execution_path()}")
-            return {
-                "query": query,
-                "context": context,
-                "response": result.get_final_response() or "No response generated.",
-                "classification": result.get_classification(),
-                "toolsused": list(set(result.get_tools_used())),
-                "executionpath": result.get_execution_path(),
-                "errors": result.get_errors(),
-            }
+            result = await graph.ainvoke(initial_state)
+            logger.info(f"Orchestration complete. Result: {str(result)}")
+            return result
         except Exception as e:
             logger.error(f"Orchestration error: {e}", exc_info=True)
             return {
