@@ -1,13 +1,12 @@
-import asyncio
+jmport asyncio
 import logging
 from typing import Dict, Any
 from dataclasses import dataclass, field
 from langgraph.graph import StateGraph, START, END
-from aiagentruntime.agents import AgentManifest, SupervisorAgent, CodeExpertAgent, KnowledgeScoutAgent
-from aiagentruntime.utils import getlogger
+from ai_agent_runtime.agents import AgentManifest, SupervisorAgent, CodeExpertAgent, KnowledgeScoutAgent
+from ai_agent_runtime.utils import get_logger
 
-logger = getlogger()
-getloggername()
+logger = get_logger(__name__)
 
 @dataclass
 class OrchestratorState:
@@ -47,7 +46,7 @@ class MultiAgentOrchestrator:
     async def classifytask(self, state: OrchestratorState) -> OrchestratorState:
         # Calls supervisor asynchronously and updates state accordingly
         supervisor: SupervisorAgent = self.agents["supervisor"]
-        output = await supervisor.execute(state.query, state.context, {})
+        output = await supervisor._execute(state.query, state.context, {})
         state.classification = output.content
         # Assume reasoning parsing done inside
         state.classificationreasoning = output.reasoning
@@ -55,13 +54,13 @@ class MultiAgentOrchestrator:
 
     async def executecodeexpert(self, state: OrchestratorState) -> OrchestratorState:
         agent: CodeExpertAgent = self.agents["codeexpert"]
-        output = await agent.execute(state.query, state.context, {})
+        output = await agent._execute(state.query, state.context, {})
         state.codeexpertresult = output.content
         return state
 
     async def executeknowledgescout(self, state: OrchestratorState) -> OrchestratorState:
         agent: KnowledgeScoutAgent = self.agents["knowledgescout"]
-        output = await agent.execute(state.query, state.context, {})
+        output = await agent._execute(state.query, state.context, {})
         state.knowledgeresult = output.content
         return state
 
