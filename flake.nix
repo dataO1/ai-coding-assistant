@@ -55,7 +55,7 @@ EOF
         default = aiAgentRuntime;
       };
 
-      devShells = flake-utils.lib.eachDefaultSystem (system: let
+      devShells = let
         pkgs = nixpkgs.legacyPackages.${system};
       in
       pkgs.mkShell {
@@ -68,13 +68,13 @@ EOF
         shellHook = ''
           echo "Install Python deps with: pip install langchain langchain-community langchain-openai fastapi uvicorn pydantic langgraph"
         '';
-      });
+      };
 
       nixosModules = {
         default = { config, pkgs, lib, ... }:
           let
             system = config.system;
-            aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
+            aiAgentRuntime = self.packages.default;
             cfg = config.services.aiAgent;
           in
           {
