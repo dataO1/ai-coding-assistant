@@ -170,7 +170,7 @@ EOF
       };
 
       homeManagerModules = {
-        default = {self, nixpkgs, config, lib, pkgs, ... }:
+        default = {nixpkgs, config, lib, pkgs, ... }:
         let
           cfg = config.programs.aiAgent;
           system = "x86_64-linux";
