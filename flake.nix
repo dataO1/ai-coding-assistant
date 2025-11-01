@@ -81,7 +81,6 @@ EOF
             # system = config.system;
             system = "x86_64-linux";
             aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
-            aiAgentRuntime = self.packages.ai-agent-runtime;
             cfg = config.services.aiAgent;
           in
           {
