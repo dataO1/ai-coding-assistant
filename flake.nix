@@ -22,7 +22,8 @@
       ]);
     in
     flake-utils.lib.eachDefaultSystem (system:
-      let
+    let
+        inherit system;
         pkgs = nixpkgs.legacyPackages.${system};
         lib = nixpkgs.lib;
 
