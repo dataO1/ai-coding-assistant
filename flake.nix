@@ -174,6 +174,9 @@
       # Home Manager Module
       # ========================================================================
 
-      homeManagerModules.default = import ./home-manager-module/default.nix;
+    # Fix here: call the import with required params
+    homeManagerModules.default = (import ./home-manager-module/default.nix) {
+      inherit pkgs lib aiAgentRuntime;
     };
+  };
 }
