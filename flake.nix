@@ -1,7 +1,7 @@
 {
   description = "AI Coding Assistant - Multi-agent orchestration with LangChain";
 
-  outputs = { self, nixpkgs, flake-utils, ... }:
+  outputs = { self,  ... } @ inputs:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
