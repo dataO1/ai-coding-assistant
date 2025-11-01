@@ -79,6 +79,10 @@
       nixosModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.services.aiAgent;
+
+          inherit system;
+          pkgs = nixpkgs.legacyPackages.${system};
+          lib = nixpkgs.lib;
           aiAgentRuntime = self.packages.${pkgs.system}.ai-agent-runtime;
         in
         {
