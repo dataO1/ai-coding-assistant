@@ -2,7 +2,7 @@
   description = "AI Coding Assistant - Multi-agent orchestration with LangChain";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/25.05";
     flake-utils.url = "github:numtide/flake-utils";
   };
 
