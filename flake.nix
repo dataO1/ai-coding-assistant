@@ -74,7 +74,7 @@ EOF
         default = { config, pkgs, lib, ... }:
           let
             system = config.system;
-            aiAgentRuntime = self.packages.ai-agent-runtime;
+            aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
             cfg = config.services.aiAgent;
           in
           {
@@ -175,7 +175,7 @@ EOF
           cfg = config.programs.aiAgent;
           system = "x86_64-linux";
           inherit pkgs lib;
-          aiAgentRuntime = self.packages.ai-agent-runtime;
+          aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
 
           pipelineModule = lib.types.submodule {
             options = {
