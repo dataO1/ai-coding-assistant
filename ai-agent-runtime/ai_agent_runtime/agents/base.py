@@ -5,7 +5,7 @@ from contextlib import AsyncExitStack
 from pydantic import BaseModel, Field
 from langchain_community.chat_models import ChatOllama
 from langchain_core.prompts import ChatPromptTemplate
-from ai_agent_runtime.utils import getlogger
+from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from ai_agent_runtime.utils import get_logger
 
