@@ -1,8 +1,7 @@
-{ config, lib, pkgs, ... }:
+{ config, system, lib, pkgs, ... }:
 
 let
   cfg = config.programs.aiAgent;
-  inherit system;
   aiAgentRuntime = pkgs.legacyPackages.${system}.ai-agent-runtime;
 
   pipelineModule = lib.types.submodule {
