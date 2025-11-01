@@ -55,6 +55,11 @@ EOF
         default = aiAgentRuntime;
       };
 
+      packages = {
+        ai-agent-runtime = aiAgentRuntime;
+        default = aiAgentRuntime;
+      };
+
       devShells.${system}.default = let
         pkgs = nixpkgs.legacyPackages.${system};
       in
@@ -73,8 +78,10 @@ EOF
       nixosModules = {
         default = { config, pkgs, lib, ... }:
           let
-            system = config.system;
+            # system = config.system;
+            system = "x86_64-linux";
             aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
+            aiAgentRuntime = self.packages.ai-agent-runtime;
             cfg = config.services.aiAgent;
           in
           {
