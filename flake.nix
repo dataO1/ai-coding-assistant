@@ -174,8 +174,7 @@ EOF
         let
           cfg = config.programs.aiAgent;
           system = "x86_64-linux";
-          pkgs = nixpkgs.legacyPackages.${system};
-          lib = nixpkgs.lib;
+          inherit pkgs lib;
           aiAgentRuntime = self.packages.ai-agent-runtime;
 
           pipelineModule = lib.types.submodule {
