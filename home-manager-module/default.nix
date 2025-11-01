@@ -2,8 +2,7 @@
 
 let
   cfg = config.programs.aiAgent;
-  inherit system;
-  pkgs = nixpkgs.legacyPackages.${system};
+  inherit system pkgs;
 
   pipelineModule = lib.types.submodule {
     options = {
