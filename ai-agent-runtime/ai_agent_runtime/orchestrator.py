@@ -103,7 +103,9 @@ class MultiAgentOrchestrator:
             return "compose"
 
     def buildgraph(self) -> StateGraph:
-        graphbuilder = StateGraph[dict]()
+        # graphbuilder = StateGraph[dict]()
+
+        graphbuilder = StateGraph(dict)
         graphbuilder.add_node("classify", self.classifynodewrapper)
         graphbuilder.add_node("codeexpert", self.codenodewrapper)
         graphbuilder.add_node("knowledgescout", self.knowledgenodewrapper)
