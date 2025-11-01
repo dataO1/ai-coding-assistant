@@ -1,4 +1,4 @@
-{ config, lib, pkgs, aiAgentRuntime, ... }:
+{ config, lib, pkgs, ... }:
 
 let
   cfg = config.programs.aiAgent;
