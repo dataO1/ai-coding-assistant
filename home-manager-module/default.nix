@@ -1,8 +1,10 @@
-{ config, lib, pkgs, aiAgentRuntime, ... }:
+{ config, lib, pkgs, aiAgentRuntime ... }:
 
 let
   cfg = config.programs.aiAgent;
-  system = "x86_64-linux";
+  inherit system;
+  pkgs = nixpkgs.legacyPackages.${system};
+  lib = nixpkgs.lib;
 
   pipelineModule = lib.types.submodule {
     options = {
@@ -63,7 +65,7 @@ in
         Type = "simple";
 
         # Use absolute path to ai-agent-server binary from package
-        ExecStart = "${aiAgentRuntime}/bin/ai-agent-server";
+        ExecStart = "${pkgs.ai-agent-runtime}/bin/ai-agent-server";
 
         Restart = "on-failure";
         RestartSec = "10s";
