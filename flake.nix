@@ -169,11 +169,6 @@ EOF
           };
       };
 
-      homeManagerModules = {
-        default = (import ./home-manager-module/default.nix) {
-          inherit pkgs lib;
-          aiAgentRuntime = aiAgentRuntime;
-        };
-      };
+      homeManagerModules.default = import ./home-manager-module/default.nix;
     };
 }
