@@ -7,7 +7,8 @@
   };
 
   outputs = { self, nixpkgs, flake-utils, ... }:
-    let
+  let
+      system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
       # Python environment for the runtime
       pythonEnv = pkgs: pkgs.python311.withPackages (ps: with ps; [
