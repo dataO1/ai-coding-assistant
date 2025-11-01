@@ -76,9 +76,6 @@
       nixosModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.services.aiAgent;
-          system = "x86_64-linux";
-          pkgs = nixpkgs.legacyPackages.${system};
-          lib = nixpkgs.lib;
           aiAgentRuntime = self.packages.${pkgs.system}.ai-agent-runtime;
         in
         {
@@ -177,9 +174,6 @@
       # Home Manager Module
       # ========================================================================
 
-    # Fix here: call the import with required params
-    homeManagerModules.default = (import ./home-manager-module/default.nix) {
-      inherit pkgs lib aiAgentRuntime;
+      homeManagerModules.default = import ./home-manager-module/default.nix;
     };
-  };
 }
