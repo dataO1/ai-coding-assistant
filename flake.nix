@@ -8,7 +8,7 @@
 
   outputs = { self, nixpkgs, flake-utils, ... }:
     let
-    inherit pkgs lib;
+      pkgs = nixpkgs.legacyPackages.${system};
       # Python environment for the runtime
       pythonEnv = pkgs: pkgs.python311.withPackages (ps: with ps; [
         langchain
