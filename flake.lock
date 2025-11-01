@@ -34,22 +34,6 @@
         "type": "github"
       }
     },
-    "langchain-mcp-adapters-repo": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1761860109,
-        "narHash": "sha256-IJ1FqMAlnxcEPZWNeHfijWX7/CEWIoqMdKjPHgZ0jZA=",
-        "owner": "langchain-ai",
-        "repo": "langchain-mcp-adapters",
-        "rev": "8b02c5316de79c8160d7512e28ef083549d13b4e",
-        "type": "github"
-      },
-      "original": {
-        "owner": "langchain-ai",
-        "repo": "langchain-mcp-adapters",
-        "type": "github"
-      }
-    },
     "lsp-mcp-repo": {
       "flake": false,
       "locked": {
@@ -118,7 +102,6 @@
       "inputs": {
         "flake-utils": "flake-utils",
         "git-mcp-server-repo": "git-mcp-server-repo",
-        "langchain-mcp-adapters-repo": "langchain-mcp-adapters-repo",
         "lsp-mcp-repo": "lsp-mcp-repo",
         "mcp-docs-rag-repo": "mcp-docs-rag-repo",
         "mcp-filesystem-server-repo": "mcp-filesystem-server-repo",

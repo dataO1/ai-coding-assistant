@@ -106,26 +106,68 @@
       };
 
       # ============================================================================
+      # AGENT SHELL SCRIPT
+      # ============================================================================
+
+      agent-shell = pkgs.writeShellScriptBin "agent" (builtins.readFile ./ai-agent-runtime/scripts/agent.sh);
+
+
+      # ============================================================================
+      # PYTHON ENVIRONMENT
+      # ============================================================================
+
+      pythonEnv = pkgs.python312.withPackages (ps: with ps; [
+        langchain
+        langchain-community
+        langchain-core
+        langgraph
+        fastapi
+        uvicorn
+        pydantic
+        pydantic-settings
+        mcp
+        python-dotenv
+        pyyaml
+        typing-extensions
+        aiofiles
+        httpx
+        pip
+        setuptools
+        wheel
+      ]);
+
+      # ============================================================================
       # RUNTIME PACKAGE
       # ============================================================================
 
       aiAgentRuntime = pkgs.stdenv.mkDerivation {
         name = "ai-agent-runtime";
-        src = ./ai-agent-runtime;
+        src = ./.;
+
+        nativeBuildInputs = [ pythonEnv ];
 
         installPhase = ''
-          mkdir -p $out/lib $out/bin
-          cp -r . $out/lib/ai-agent-runtime
+          # Create output structure
+          mkdir -p $out/lib
+          mkdir -p $out/bin
 
-          cat > $out/bin/ai-agent-server << EOF
+          # Copy the entire project (preserves ai_agent_runtime module structure)
+          cp -r ai-agent-runtime $out/lib/
+
+          # Create python launcher that adds lib to path
+          cat > $out/bin/ai-agent-server << 'EOF'
           #!/usr/bin/env bash
           set -e
-          export PYTHONPATH="$out/lib:\$PYTHONPATH"
+          export PYTHONPATH="$out/lib/ai-agent-runtime:''${PYTHONPATH}"
           export PYTHONUNBUFFERED=1
-          cd "$out/lib/ai-agent-runtime"
-          exec \$@
+          exec ${pythonEnv}/bin/python -m ai_agent_runtime.server "''$@"
           EOF
           chmod +x $out/bin/ai-agent-server
+
+          # Copy agent shell script
+          mkdir -p $out/bin
+          cp -r ai-agent-runtime/scripts/* $out/bin/ || true
+          chmod +x $out/bin/*.sh 2>/dev/null || true
         '';
       };
 
@@ -136,6 +178,7 @@
 
       packages = {
         ai-agent-runtime = aiAgentRuntime;
+        agent-shell = agent-shell;
         git-mcp-server = git-mcp-server;
         lsp-mcp = lsp-mcp;
         mcp-filesystem-server = mcp-filesystem-server;
@@ -154,7 +197,10 @@
           uv
           git
           direnv
+          agent-shell
         ];
+
+        packages = [aiAgentRuntime agent-shell];
 
         env = {
           OLLAMA_BASE_URL = "http://localhost:11434";
@@ -163,6 +209,9 @@
         };
 
         shellHook = ''
+          # Add current directory ai-agent-runtime to PYTHONPATH
+          export PYTHONPATH="${builtins.toString ./.}/ai-agent-runtime:''${PYTHONPATH}"
+
           # Initialize or activate venv
           if [ ! -d ".venv" ]; then
             ${pkgs.uv}/bin/uv venv .venv --python ${pkgs.python312}/bin/python3.12
@@ -176,6 +225,7 @@
           echo "│  AI Agent Runtime Development Environment                │"
           echo "├──────────────────────────────────────────────────────────┤"
           echo "│ Python: $(python --version)                             │"
+          echo "│ PYTHONPATH: $PYTHONPATH"
           echo "│ Package Manager: uv (fast, deterministic)               │"
           echo "│ FastAPI Server: http://localhost:3000                   │"
           echo "│ Ollama: http://localhost:11434                          │"
@@ -189,13 +239,14 @@
           echo "│                                                          │"
           echo "│ Quick Start:                                             │"
           echo "│  python -m ai_agent_runtime.server                      │"
+          echo "│  or: agent                                               │"
           echo "│                                                          │"
           echo "╰──────────────────────────────────────────────────────────╯"
         '';
       };
 
       # ============================================================================
-      # NIXOS MODULE (unchanged)
+      # NIXOS MODULE
       # ============================================================================
 
       nixosModules.default = { config, pkgs, lib, ... }:
@@ -228,12 +279,12 @@
             };
 
             networking.firewall.allowedTCPPorts = [ cfg.port ];
-            environment.systemPackages = with pkgs; [ git curl aiAgentRuntime ];
+            environment.systemPackages = with pkgs; [ git curl aiAgentRuntime agent-shell ];
           };
         };
 
       # ============================================================================
-      # HOME-MANAGER MODULE (unchanged)
+      # HOME-MANAGER MODULE
       # ============================================================================
 
       homeManagerModules.default = { config, lib, pkgs, ... }:
@@ -287,7 +338,7 @@
 
               Service = {
                 Type = "simple";
-                ExecStart = "${pkgs.python312}/bin/python -m ai_agent_runtime.server";
+                ExecStart = "${pkgs.agent-shell}/bin/agent";
                 Restart = "on-failure";
                 RestartSec = "10s";
                 Environment = [
@@ -303,7 +354,7 @@
               Install.WantedBy = [ "default.target" ];
             };
 
-            home.packages = with pkgs; [ curl jq git ];
+            home.packages = with pkgs; [ curl jq git agent-shell ];
           };
         };
     }
