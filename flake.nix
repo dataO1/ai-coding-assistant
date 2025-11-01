@@ -6,7 +6,7 @@
     flake-utils.url = "github:numtide/flake-utils";
   };
 
-  outputs = { self, nixpkgs, flake-utils, ... }:
+  outputs = { self, nixpkgs, lib, flake-utils, ... }:
   let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
