@@ -50,12 +50,12 @@ EOF
       };
     in
     {
-      packages = {
+      packages.${system} = {
         ai-agent-runtime = aiAgentRuntime;
         default = aiAgentRuntime;
       };
 
-      devShells = let
+      devShells.${system}.default = let
         pkgs = nixpkgs.legacyPackages.${system};
       in
       pkgs.mkShell {
@@ -256,7 +256,7 @@ EOF
             };
             home.file.".local/bin/ai".source = pkgs.writeShellScript "ai-cli" ''
               #!/usr/bin/env bash
-              AGENT_URL="''${AI_AGENT_SERVER_URL:-http://localhost:8080}"
+              AGENT_URL="''${AI_AGENT_SERVER_URL:-http://localhost:3000}"
               PIPELINE="''${1:-supervisor}"
               QUERY="''${@:2}"
 

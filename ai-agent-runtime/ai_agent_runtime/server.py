@@ -21,7 +21,7 @@ logger = get_logger(__name__)
 # ============================================================================
 
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
-AGENT_PORT = int(os.getenv("AGENT_SERVER_PORT", "8080"))
+AGENT_PORT = int(os.getenv("AGENT_SERVER_PORT", "3000"))
 MANIFESTS_PATH = Path(os.getenv("AI_AGENT_MANIFESTS", Path.home() / ".config/ai-agent/manifests.json"))
 
 logger.info(f"Loading manifests from: {MANIFESTS_PATH}")
@@ -36,11 +36,7 @@ else:
     logger.warning(f"Manifests file not found: {MANIFESTS_PATH}")
 
 # Initialize orchestrator (only needs ollama_url and pipeline_manifests)
-orchestrator = MultiAgentOrchestrator(
-    ollama_url=OLLAMA_URL,
-    pipeline_manifests=manifests.get("pipelines", {}),
-)
-
+orchestrator = MultiAgentOrchestrator(OLLAMA_URL, manifests.get("pipelines", {}))
 # ============================================================================
 # FastAPI App
 # ============================================================================
@@ -82,18 +78,11 @@ async def list_pipelines():
     ]
 
 @app.post("/api/query")
-async def query(request: QueryRequest):
-    """Query the orchestrator"""
-    logger.info(f"Processing query in context '{request.context}'")
-
+async def query_endpoint(request: QueryRequest):
     try:
-        result = await orchestrator.execute(
-            query=request.query,
-            context=request.context,
-        )
+        result = await orchestrator.execute(request.query, request.context)
         return result
     except Exception as e:
-        logger.error(f"Error processing query: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/v1/models")
