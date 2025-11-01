@@ -3,7 +3,7 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 
-from langchain.chat_models import ChatOllama
+from langchain_community.chat_models import ChatOllama
 from langchain.prompts import ChatPromptTemplate
 
 from ai_agent_runtime.utils import get_logger
