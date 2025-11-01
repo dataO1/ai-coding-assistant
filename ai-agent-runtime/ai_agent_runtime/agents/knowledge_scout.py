@@ -7,71 +7,42 @@ from ai_agent_runtime.utils import get_logger
 logger = get_logger(__name__)
 
 class KnowledgeScoutAgent(BaseAgent):
-    """Research and learning specialist agent..."""
+    """Research and knowledge retrieval specialist with MCP tool support."""
 
-    # ... rest of code
+    def get_temperature(self) -> float:
+        """Knowledge scout is exploratory."""
+        return 0.7
 
-class KnowledgeScoutAgent(BaseAgent):
-    """
-    Research and learning specialist agent.
-
-    Specializes in:
-    - Explaining concepts and patterns
-    - Documentation and best practices
-    - Technology research and recommendations
-    - Learning resources and tutorials
-
-    Provides nuanced, well-structured explanations with examples.
-    """
-
-    def _get_temperature(self) -> float:
-        """Slightly higher temperature for nuanced explanations"""
-        return 0.3
-
-    async def _execute(
-        self,
-        query: str,
-        context: str,
-        resolved_tools: Dict[str, Any],
+    async def execute(
+        self, query: str, context: str, resolved_tools: Dict[str, Any]
     ) -> AgentOutput:
-        """Execute knowledge scout agent"""
+        """Execute knowledge scout agent with automatic tool calling."""
+        try:
+            prompt = self.create_prompt(self.manifest.systemPrompt)
 
-        tools_info = self.format_tools_info(resolved_tools)
+            logger.info(f"Knowledge Scout processing: {query[:60]}...")
 
-        system_prompt = f"""{self.manifest.systemPrompt}
+            # LangChain handles tool calling automatically
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.llm_with_tools.invoke(
+                    prompt.format_messages(input=query)
+                ),
+            )
 
-AVAILABLE TOOLS:
-{tools_info}
+            # Extract tool calls if any
+            tool_calls = getattr(response, "tool_calls", [])
+            if tool_calls:
+                logger.info(f"Knowledge Scout used {len(tool_calls)} tools")
 
-CONTEXT: {context}
-
-Structure your response as:
-1. Definition/Overview
-2. Key concepts
-3. Practical examples (if relevant)
-4. Best practices
-5. Resources for deeper learning
-
-Be thorough but concise.
-"""
-
-        prompt = self.create_prompt(system_prompt)
-        chain = prompt | self.llm
-
-        logger.info(f"Knowledge scout processing: {query[:60]}...")
-
-        response = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: chain.invoke({"input": query})
-        )
-
-        logger.debug(f"Knowledge scout response length: {len(response.content)}")
-
-        return AgentOutput(
-            content=response.content,
-            tools_used=resolved_tools["resolved"],
-            metadata={
-                "agent_type": "knowledge_scout",
-                "context": context,
-            }
-        )
+            return AgentOutput(
+                content=response.content,
+                toolsused=[tc.get("name", "") for tc in tool_calls],
+                metadata={"context": context},
+            )
+        except Exception as e:
+            logger.error(f"Knowledge Scout error: {e}", exc_info=True)
+            return AgentOutput(
+                content=f"Error: {str(e)}",
+                reasoning=str(e),
+            )

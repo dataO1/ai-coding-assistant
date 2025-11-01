@@ -1,5 +1,5 @@
 # ai-agent-runtime/ai_agent_runtime/server.py
-
+from fastapi.responses import JSONResponse
 import os
 import json
 import asyncio
@@ -80,7 +80,7 @@ async def list_pipelines():
 async def query_endpoint(request: QueryRequest):
     try:
         result = await orchestrator.execute(request.query, request.context)
-        return result
+        return JSONResponse(status_code=200, content=result)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

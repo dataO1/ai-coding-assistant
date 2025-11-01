@@ -1,12 +1,38 @@
 {
-  description = "AI Coding Assistant - Multi-agent orchestration with LangChain";
+  description = "AI Coding Assistant - Multi-agent orchestration with LangChain and MCP";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/25.05";
     flake-utils.url = "github:numtide/flake-utils";
+
+    # Official MCP Servers Repository
+    mcp-servers-repo = {
+      url = "github:modelcontextprotocol/servers";
+      flake = false;
+    };
+
+    # GitHub Official MCP Server
+    github-mcp-server-repo = {
+      url = "github:github/github-mcp-server";
+      flake = false;
+    };
+
+    # LangChain MCP Adapters
+    langchain-mcp-adapters-repo = {
+      url = "github:langchain-ai/langchain-mcp-adapters";
+      flake = false;
+    };
   };
 
-  outputs = { self, nixpkgs, flake-utils, ... }:
+  outputs =
+    { self
+    , nixpkgs
+    , flake-utils
+    , mcp-servers-repo
+    , github-mcp-server-repo
+    , langchain-mcp-adapters-repo
+    , ...
+    }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -16,19 +42,184 @@
         builtins.readFile ./ai-agent-runtime/scripts/agent.sh
       );
 
-      # Python environment for the runtime
+      # ============================================================================
+      # MCP SERVER BUILDS FROM SOURCE
+      # ============================================================================
+
+      # Build langchain-mcp-adapters from source
+      langchain-mcp-adapters = pkgs.python311Packages.buildPythonPackage {
+        pname = "langchain-mcp-adapters";
+        version = "0.1.0";
+        src = langchain-mcp-adapters-repo;
+        format = "pyproject";
+
+        nativeBuildInputs = with pkgs.python311Packages; [
+          poetry-core
+          setuptools
+          wheel
+        ];
+
+        propagatedBuildInputs = with pkgs.python311Packages; [
+          langchain-core
+          pydantic
+          typing-extensions
+          aiofiles
+          httpx
+        ];
+
+        doCheck = false;
+
+        meta = {
+          description = "LangChain MCP Adapters";
+          homepage = "https://github.com/langchain-ai/langchain-mcp-adapters";
+        };
+      };
+
+      # Build Filesystem MCP Server from official repository
+      mcp-server-filesystem = pkgs.python311Packages.buildPythonPackage {
+        pname = "mcp-server-filesystem";
+        version = "0.5.0";
+        src = "${mcp-servers-repo}/src/filesystem";
+        format = "pyproject";
+
+        nativeBuildInputs = with pkgs.python311Packages; [
+          poetry-core
+          setuptools
+          wheel
+        ];
+
+        propagatedBuildInputs = with pkgs.python311Packages; [
+          mcp
+          pydantic
+          typing-extensions
+        ];
+
+        doCheck = false;
+
+        meta = {
+          description = "MCP Server for filesystem operations";
+          homepage = "https://github.com/modelcontextprotocol/servers";
+        };
+      };
+
+      # Build Git MCP Server from official repository
+      mcp-server-git = pkgs.python311Packages.buildPythonPackage {
+        pname = "mcp-server-git";
+        version = "0.5.0";
+        src = "${mcp-servers-repo}/src/git";
+        format = "pyproject";
+
+        nativeBuildInputs = with pkgs.python311Packages; [
+          poetry-core
+          setuptools
+          wheel
+        ];
+
+        propagatedBuildInputs = with pkgs.python311Packages; [
+          mcp
+          pydantic
+          typing-extensions
+          gitpython
+        ];
+
+        doCheck = false;
+
+        meta = {
+          description = "MCP Server for git operations";
+          homepage = "https://github.com/modelcontextprotocol/servers";
+        };
+      };
+
+      # Build Web Search MCP Server from official repository
+      mcp-server-web-search = pkgs.python311Packages.buildPythonPackage {
+        pname = "mcp-server-web-search";
+        version = "0.5.0";
+        src = "${mcp-servers-repo}/src/web-search";
+        format = "pyproject";
+
+        nativeBuildInputs = with pkgs.python311Packages; [
+          poetry-core
+          setuptools
+          wheel
+        ];
+
+        propagatedBuildInputs = with pkgs.python311Packages; [
+          mcp
+          pydantic
+          typing-extensions
+          httpx
+          beautifulsoup4
+        ];
+
+        doCheck = false;
+
+        meta = {
+          description = "MCP Server for web search";
+          homepage = "https://github.com/modelcontextprotocol/servers";
+        };
+      };
+
+      # Build GitHub Official MCP Server
+      github-mcp-server = pkgs.buildGoModule {
+        pname = "github-mcp-server";
+        version = "1.0.0";
+        src = github-mcp-server-repo;
+
+        vendorHash = null;  # Let it auto-detect
+
+        subPackages = [ "." ];
+
+        meta = {
+          description = "GitHub's official MCP Server for repository access";
+          homepage = "https://github.com/github/github-mcp-server";
+        };
+      };
+
+      # ============================================================================
+      # PYTHON ENVIRONMENT WITH MCP SERVERS
+      # ============================================================================
+
       pythonEnv = pkgs.python311.withPackages (ps: with ps; [
+        # Core LLM framework
         langchain
         langchain-community
-        langchain-openai
+        langchain-core
+        langgraph
+
+        # Web framework
         fastapi
         uvicorn
         pydantic
         pydantic-settings
-        langgraph
+
+        # MCP integration (built from source above)
+        langchain-mcp-adapters
+        mcp
+
+        # MCP server implementations (built from source above)
+        mcp-server-filesystem
+        mcp-server-git
+        mcp-server-web-search
+
+        # Supporting libraries
+        python-dotenv
+        pyyaml
+        typing-extensions
+        aiofiles
+        httpx
+        gitpython
+        beautifulsoup4
+
+        # Development tools
+        pip
+        setuptools
+        wheel
       ]);
 
-      # Build the runtime package
+      # ============================================================================
+      # RUNTIME PACKAGE
+      # ============================================================================
+
       aiAgentRuntime = pkgs.stdenv.mkDerivation {
         name = "ai-agent-runtime";
         src = ./ai-agent-runtime;
@@ -39,165 +230,169 @@
           mkdir -p $out/lib
           mkdir -p $out/bin
 
-          # Copy entire ai-agent-runtime as a package
+          # Copy the entire ai-agent-runtime as a package
           cp -r . $out/lib/ai-agent-runtime
 
-          # Create launcher script
+          # Create launcher script with MCP environment
           cat > $out/bin/ai-agent-server << EOF
           #!/usr/bin/env bash
+          set -e
+
           export PYTHONPATH="$out/lib:\$PYTHONPATH"
+          export PYTHONUNBUFFERED=1
+
           cd "$out/lib/ai-agent-runtime"
-          exec ${pythonEnv}/bin/python -m ai_agent_runtime.server "\$@"
+          exec ${pythonEnv}/bin/python -m aiagentruntime.server "\$@"
           EOF
           chmod +x $out/bin/ai-agent-server
         '';
       };
+
     in
     {
       packages.${system} = {
         ai-agent-runtime = aiAgentRuntime;
+
+        # Export MCP servers and adapters
+        langchain-mcp-adapters = langchain-mcp-adapters;
+        mcp-server-filesystem = mcp-server-filesystem;
+        mcp-server-git = mcp-server-git;
+        mcp-server-web-search = mcp-server-web-search;
+        github-mcp-server = github-mcp-server;
+
         default = aiAgentRuntime;
       };
 
       packages = {
         ai-agent-runtime = aiAgentRuntime;
+        langchain-mcp-adapters = langchain-mcp-adapters;
+        mcp-server-filesystem = mcp-server-filesystem;
+        mcp-server-git = mcp-server-git;
+        mcp-server-web-search = mcp-server-web-search;
+        github-mcp-server = github-mcp-server;
         default = aiAgentRuntime;
       };
 
-      devShells.${system}.default = let
-        pkgs = nixpkgs.legacyPackages.${system};
-        aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
-      in
-      pkgs.mkShell {
-        buildInputs = with pkgs; [
-          pythonEnv
-          nodejs_22
-          git
-        ];
-        # set env variables
-        OLLAMA_BASE_URL=http://localhost:11434;
-        AGENT_SERVER_PORT=3000;
+      devShells.${system}.default =
+        pkgs.mkShell {
+          buildInputs = with pkgs; [
+            pythonEnv
+            git
+            go
+            tree-sitter
+            pkg-config
+            libgit2
+            ruff
+            black
+            mypy
+            pytest
+          ];
 
-        AI_AGENT_SERVER_URL = "http://0.0.0.0:3000";
-        # AI_AGENT_MANIFESTS=%h/.config/ai-agent/manifests.json;
-        PYTHONUNBUFFERED=1;
-        packages = [
-          aiAgentRuntime
-          agent-shell
-        ];
+          OLLAMA_BASE_URL = "http://localhost:11434";
+          AGENT_SERVER_PORT = "3000";
+          PYTHONUNBUFFERED = "1";
 
+          packages = [
+            aiAgentRuntime
+            agent-shell
+          ];
 
-        shellHook = ''
-          echo "Install Python deps with: pip install langchain langchain-community langchain-openai fastapi uvicorn pydantic langgraph"
-        '';
-      };
+          shellHook = ''
+            echo "╭──────────────────────────────────────────────────────────╮"
+            echo "│  AI Agent Runtime Development Environment                │"
+            echo "├──────────────────────────────────────────────────────────┤"
+            echo "│ Python: $(python --version)                             │"
+            echo "│ Go: $(go version)                                       │"
+            echo "│                                                          │"
+            echo "│ FastAPI Server: http://localhost:3000                   │"
+            echo "│ Ollama: http://localhost:11434                          │"
+            echo "│                                                          │"
+            echo "│ MCP Servers Enabled:                                    │"
+            echo "│  ✓ Filesystem - File operations                         │"
+            echo "│  ✓ Git - Repository operations                          │"
+            echo "│  ✓ GitHub - Code context from GitHub                   │"
+            echo "│  ✓ Web Search - Research capabilities                  │"
+            echo "│                                                          │"
+            echo "│ Quick Start:                                             │"
+            echo "│  python -m aiagentruntime.server                        │"
+            echo "│                                                          │"
+            echo "╰──────────────────────────────────────────────────────────╯"
+          '';
+        };
 
-      nixosModules = {
-        default = { config, pkgs, lib, ... }:
-          let
-            # system = config.system;
-            system = "x86_64-linux";
-            aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
-            cfg = config.services.aiAgent;
-          in
-          {
-            options.services.aiAgent = {
-              enable = lib.mkEnableOption "AI Agent Server";
+      nixosModules.default = { config, pkgs, lib, ... }:
+        let
+          system = "x86_64-linux";
+          aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
+          cfg = config.services.aiAgent;
+        in
+        {
+          options.services.aiAgent = {
+            enable = lib.mkEnableOption "AI Agent Server with MCP";
 
-              gpuAcceleration = lib.mkOption {
-                type = lib.types.bool;
-                default = true;
-                description = "Enable GPU acceleration for Ollama";
-              };
-
-              ollamaHost = lib.mkOption {
-                type = lib.types.str;
-                default = "127.0.0.1";
-                description = "Ollama server host";
-              };
-
-              ollamaPort = lib.mkOption {
-                type = lib.types.port;
-                default = 11434;
-                description = "Ollama server port";
-              };
-
-              port = lib.mkOption {
-                type = lib.types.port;
-                default = 3000;
-                description = "Agent server port";
-              };
-
-              models = lib.mkOption {
-                type = lib.types.attrsOf lib.types.str;
-                default = {
-                  supervisor = "qwen2.5-coder:7b";
-                  code = "qwen2.5-coder:14b";
-                  research = "qwen2.5-coder:70b";
-                };
-                description = "Models to load in Ollama";
-              };
-
-              mcpServers = lib.mkOption {
-                type = lib.types.attrsOf (lib.types.submodule {
-                  options = {
-                    enable = lib.mkOption { type = lib.types.bool; default = true; };
-                    command = lib.mkOption { type = lib.types.str; };
-                    args = lib.mkOption {
-                      type = lib.types.listOf lib.types.str;
-                      default = [];
-                    };
-                  };
-                });
-                default = {
-                  filesystem = {
-                    enable = true;
-                    command = "${pkgs.nodejs}/bin/npx";
-                    args = [ "-y" "@modelcontextprotocol/server-filesystem" "/home" ];
-                  };
-                  git = {
-                    enable = true;
-                    command = "${pkgs.nodejs}/bin/npx";
-                    args = [ "-y" "@modelcontextprotocol/server-git" ];
-                  };
-                };
-                description = "MCP servers configuration";
-              };
+            port = lib.mkOption {
+              type = lib.types.port;
+              default = 3000;
+              description = "Agent server port";
             };
 
-            config = lib.mkIf cfg.enable {
-              services.ollama = {
-                enable = true;
-                acceleration = if cfg.gpuAcceleration then "cuda" else null;
-                host = cfg.ollamaHost;
-                port = cfg.ollamaPort;
-                loadModels = lib.attrValues cfg.models;
-                environmentVariables = {
-                  OLLAMA_NUM_PARALLEL = "4";
-                  OLLAMA_MAX_LOADED_MODELS = "3";
-                };
+            ollamaHost = lib.mkOption {
+              type = lib.types.str;
+              default = "127.0.0.1";
+              description = "Ollama server host";
+            };
+
+            ollamaPort = lib.mkOption {
+              type = lib.types.port;
+              default = 11434;
+              description = "Ollama server port";
+            };
+
+            githubToken = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "GitHub token for GitHub MCP Server (optional)";
+            };
+
+            models = lib.mkOption {
+              type = lib.types.attrsOf lib.types.str;
+              default = {
+                supervisor = "deepseek-coder:7b-instruct";
+                code-expert = "deepseek-coder:7b-instruct";
+                knowledge-scout = "deepseek-coder:7b-instruct";
               };
-
-              networking.firewall.allowedTCPPorts = [ cfg.port ];
-
-              environment.systemPackages = with pkgs; [
-                nodejs
-                git
-                curl
-                aiAgentRuntime
-              ] ++ lib.optionals cfg.gpuAcceleration [
-                nvtopPackages.full
-              ];
+              description = "Models to preload in Ollama";
             };
           };
-      };
 
-      homeManagerModules = {
-        default = {nixpkgs, config, lib, pkgs, ... }:
+          config = lib.mkIf cfg.enable {
+            services.ollama = {
+              enable = true;
+              host = cfg.ollamaHost;
+              port = cfg.ollamaPort;
+              loadModels = lib.attrValues cfg.models;
+            };
+
+            networking.firewall.allowedTCPPorts = [ cfg.port ];
+
+            environment.systemPackages = with pkgs; [
+              git
+              curl
+              tree-sitter
+              aiAgentRuntime
+              github-mcp-server
+            ];
+
+            environment.variables = lib.optionalAttrs (cfg.githubToken != null) {
+              GITHUB_TOKEN = cfg.githubToken;
+            };
+          };
+        };
+
+      homeManagerModules.default = { nixpkgs, config, lib, pkgs, ... }:
         let
           cfg = config.programs.aiAgent;
           system = "x86_64-linux";
-          inherit pkgs lib;
           aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
 
           pipelineModule = lib.types.submodule {
@@ -205,13 +400,20 @@
               name = lib.mkOption { type = lib.types.str; };
               description = lib.mkOption { type = lib.types.str; };
               model = lib.mkOption { type = lib.types.str; };
-              requiredTools = lib.mkOption { type = lib.types.listOf lib.types.str; default = []; };
-              optionalTools = lib.mkOption { type = lib.types.listOf lib.types.str; default = []; };
-              fallbackMode = lib.mkOption { type = lib.types.enum [ "degrade" "fail" ]; default = "degrade"; };
               systemPrompt = lib.mkOption { type = lib.types.str; };
+              requiredTools = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [];
+                description = "Required MCP tools: filesystem, git, github, web-search";
+              };
+              optionalTools = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [];
+                description = "Optional MCP tools";
+              };
               contexts = lib.mkOption {
                 type = lib.types.listOf (lib.types.enum [ "nvim" "vscode" "shell" "web" ]);
-                default = [ "nvim" "vscode" "shell" ];
+                default = [ "shell" ];
               };
             };
           };
@@ -219,49 +421,61 @@
         {
           options.programs.aiAgent = {
             enable = lib.mkEnableOption "AI Agent user configuration";
+
             serverUrl = lib.mkOption {
               type = lib.types.str;
               default = "http://localhost:3000";
             };
+
             pipelines = lib.mkOption {
               type = lib.types.attrsOf pipelineModule;
               default = {};
-              description = "User-defined agent pipelines";
+              description = "Agent pipelines with MCP tool configuration";
+              example = {
+                code-expert = {
+                  name = "code-expert";
+                  description = "Expert code generator";
+                  model = "deepseek-coder:7b-instruct";
+                  systemPrompt = "You are an expert code generator...";
+                  requiredTools = [ "filesystem" "git" ];
+                  optionalTools = [ "github" "web-search" ];
+                };
+              };
             };
+
             enableUserService = lib.mkOption {
               type = lib.types.bool;
               default = true;
-              description = "Run AI Agent as user systemd service";
+              description = "Run as user systemd service";
             };
-            neovimIntegration = lib.mkOption { type = lib.types.bool; default = true; };
-            vscodeIntegration = lib.mkOption { type = lib.types.bool; default = true; };
-            shellIntegration = lib.mkOption { type = lib.types.bool; default = true; };
+
+            githubToken = lib.mkOption {
+              type = lib.types.nullOr lib.types.str;
+              default = null;
+              description = "GitHub token for GitHub MCP Server (read from ~/.config/ai-agent/github_token if not set)";
+            };
           };
 
           config = lib.mkIf cfg.enable {
-            # Create manifests file
-            home.file.".config/ai-agent/manifests.json".text = builtins.toJSON {
-              pipelines = cfg.pipelines;
-            };
+            home.file.".config/ai-agent/manifests.json".text =
+              builtins.toJSON { pipelines = cfg.pipelines; };
 
-            # Environment variables
             home.sessionVariables = {
               AI_AGENT_MANIFESTS = "${config.home.homeDirectory}/.config/ai-agent/manifests.json";
               AI_AGENT_SERVER_URL = cfg.serverUrl;
+              OLLAMA_BASE_URL = "http://localhost:11434";
             };
 
             systemd.user.services.ai-agent-server = lib.mkIf cfg.enableUserService {
               Unit = {
-                Description = "AI Agent Server (user service)";
+                Description = "AI Agent Server with MCP (user service)";
                 After = [ "network-online.target" ];
+                Wants = [ "network-online.target" ];
               };
 
               Service = {
                 Type = "simple";
-
-                # Use absolute path to ai-agent-server binary from package
                 ExecStart = "${aiAgentRuntime}/bin/ai-agent-server";
-
                 Restart = "on-failure";
                 RestartSec = "10s";
 
@@ -270,25 +484,19 @@
                   "AGENT_SERVER_PORT=3000"
                   "AI_AGENT_MANIFESTS=%h/.config/ai-agent/manifests.json"
                   "PYTHONUNBUFFERED=1"
+                ] ++ lib.optionals (cfg.githubToken != null) [
+                  "GITHUB_TOKEN=${cfg.githubToken}"
                 ];
+
+                StandardOutput = "journal";
+                StandardError = "journal";
               };
 
-              Install = {
-                WantedBy = [ "default.target" ];
-              };
-            };
-            home.file.".local/bin/agent".source = agent-shell;
-            home.shellAliases = lib.mkIf cfg.shellIntegration {
-              agent = "agent supervisor";
-              agent-code = "agent code-expert";
-              agent-research = "agent knowledge-scout";
-              agent-refactor = "agent refactoring";
-              agent-debug = "agent debug";
+              Install.WantedBy = [ "default.target" ];
             };
 
-            home.packages = with pkgs; [ curl jq ];
+            home.packages = with pkgs; [ curl jq git ];
           };
         };
-      };
     };
 }

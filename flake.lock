@@ -18,6 +18,54 @@
         "type": "github"
       }
     },
+    "github-mcp-server-repo": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1761911482,
+        "narHash": "sha256-PUxNamFxYotJ8eIf0ZG74CWBQ9hww5GpxSHX22++Nqg=",
+        "owner": "github",
+        "repo": "github-mcp-server",
+        "rev": "304f29a2fd336f6092e816b7b3cbf67729abe937",
+        "type": "github"
+      },
+      "original": {
+        "owner": "github",
+        "repo": "github-mcp-server",
+        "type": "github"
+      }
+    },
+    "langchain-mcp-adapters-repo": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1761860109,
+        "narHash": "sha256-IJ1FqMAlnxcEPZWNeHfijWX7/CEWIoqMdKjPHgZ0jZA=",
+        "owner": "langchain-ai",
+        "repo": "langchain-mcp-adapters",
+        "rev": "8b02c5316de79c8160d7512e28ef083549d13b4e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "langchain-ai",
+        "repo": "langchain-mcp-adapters",
+        "type": "github"
+      }
+    },
+    "mcp-servers-repo": {
+      "flake": false,
+      "locked": {
+        "lastModified": 1761744850,
+        "narHash": "sha256-p8jnBbSWpHhG7CooBCvA6cEIVKBDuCL3J4twG6vi0uc=",
+        "owner": "modelcontextprotocol",
+        "repo": "servers",
+        "rev": "c7c549711b1577227d0ff8ff7c67fdbf7e4a0225",
+        "type": "github"
+      },
+      "original": {
+        "owner": "modelcontextprotocol",
+        "repo": "servers",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
         "lastModified": 1748026580,
@@ -37,6 +85,9 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
+        "github-mcp-server-repo": "github-mcp-server-repo",
+        "langchain-mcp-adapters-repo": "langchain-mcp-adapters-repo",
+        "mcp-servers-repo": "mcp-servers-repo",
         "nixpkgs": "nixpkgs"
       }
     },

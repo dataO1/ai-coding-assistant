@@ -7,63 +7,38 @@ from ai_agent_runtime.utils import get_logger
 logger = get_logger(__name__)
 
 class CodeExpertAgent(BaseAgent):
-    """
-    Expert code generation and modification agent.
+    """Expert code generator and refactorer with MCP tool support."""
 
-    Specializes in:
-    - Code generation from specifications
-    - Code refactoring and optimization
-    - Bug fixing and debugging
-    - Code review and suggestions
-
-    Uses available tools (LSP, tree-sitter, git) for context-aware suggestions.
-    """
-
-    def _get_temperature(self) -> float:
-        """Slightly creative for code generation"""
-        return 0.2
-
-    async def _execute(
-        self,
-        query: str,
-        context: str,
-        resolved_tools: Dict[str, Any],
+    async def execute(
+        self, query: str, context: str, resolved_tools: Dict[str, Any]
     ) -> AgentOutput:
-        """Execute code expert agent"""
+        """Execute code expert agent with automatic tool calling."""
+        try:
+            prompt = self.create_prompt(self.manifest.systemPrompt)
 
-        tools_info = self.format_tools_info(resolved_tools)
+            logger.info(f"Code Expert processing: {query[:60]}...")
 
-        # Enhance system prompt with available tools
-        system_prompt = f"""{self.manifest.systemPrompt}
+            # LangChain handles tool calling automatically
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.llm_with_tools.invoke(
+                    prompt.format_messages(input=query)
+                ),
+            )
 
-AVAILABLE TOOLS:
-{tools_info}
+            # Extract tool calls if any
+            tool_calls = getattr(response, "tool_calls", [])
+            if tool_calls:
+                logger.info(f"Code Expert used {len(tool_calls)} tools")
 
-CONTEXT: {context}
-
-Use the available tools intelligently to provide better code suggestions.
-If LSP is available, use it for type information.
-If tree-sitter is available, use it for code structure analysis.
-If git is available, check history for patterns.
-"""
-
-        prompt = self.create_prompt(system_prompt)
-        chain = prompt | self.llm
-
-        logger.info(f"Code expert processing: {query[:60]}...")
-
-        response = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: chain.invoke({"input": query})
-        )
-
-        logger.debug(f"Code expert response length: {len(response.content)}")
-
-        return AgentOutput(
-            content=response.content,
-            tools_used=resolved_tools["resolved"],
-            metadata={
-                "agent_type": "code_expert",
-                "context": context,
-            }
-        )
+            return AgentOutput(
+                content=response.content,
+                toolsused=[tc.get("name", "") for tc in tool_calls],
+                metadata={"context": context},
+            )
+        except Exception as e:
+            logger.error(f"Code Expert error: {e}", exc_info=True)
+            return AgentOutput(
+                content=f"Error: {str(e)}",
+                reasoning=str(e),
+            )

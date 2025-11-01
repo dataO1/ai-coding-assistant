@@ -24,11 +24,12 @@ class OrchestratorState(BaseModel):
     class Config:
         frozen = False
 
-    def update(self,output: AgentOutput ):
-        for field in fields(output):
-            if hasattr(self, field.name):
-                # Shallow copy the value
-                setattr(self, field.name, getattr(output, field.name))
+    def update(self,source: AgentOutput ):
+        # Update only common fields
+        target = self
+        common_fields = set(source.model_fields) & set(target.model_fields)
+        updates = {field: getattr(source, field) for field in common_fields}
+        target = target.model_copy(update=updates)
 
 
 class MultiAgentOrchestrator:
@@ -161,7 +162,8 @@ class MultiAgentOrchestrator:
         logger.info(f"Starting orchestration for query={query[:60]}, context={context}")
 
         try:
-            result = await self.graph.ainvoke(OrchestratorState())
+            result = await self.graph.ainvoke(OrchestratorState(query=query,
+                                                                context=context))
             logger.info(f"Orchestration complete. Path: {result.get('executionpath', [])}")
 
             return {

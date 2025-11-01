@@ -1,135 +1,170 @@
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
-from dataclasses import dataclass, field
 from enum import Enum
-
+from contextlib import AsyncExitStack
+from pydantic import BaseModel, Field
 from langchain_community.chat_models import ChatOllama
-from langchain.prompts import ChatPromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
+from ai_agent_runtime.utils import getlogger
 
 from ai_agent_runtime.utils import get_logger
-from ai_agent_runtime.mcp import get_mcp_registry
 
 logger = get_logger(__name__)
 
+
 class AgentContext(str, Enum):
-    """Available execution contexts"""
+    """Available execution contexts."""
     NVIM = "nvim"
     VSCODE = "vscode"
     SHELL = "shell"
     WEB = "web"
 
-@dataclass
-class AgentManifest:
-    """Pipeline manifest defining agent capabilities"""
+
+class AgentManifest(BaseModel):
+    """Pipeline manifest defining agent capabilities."""
     name: str
     description: str
     model: str
     systemPrompt: str
-    requiredTools: List[str] = field(default_factory=list)
-    optionalTools: List[str] = field(default_factory=list)
-    fallbackMode: str = "degrade"
-    contexts: List[str] = field(default_factory=lambda: ["nvim", "vscode", "shell"])
+    requiredTools: List[str] = Field(default_factory=list)
+    optionalTools: List[str] = Field(default_factory=list)
+    contexts: List[str] = Field(default_factory=lambda: ["shell"])
 
-@dataclass
-class AgentOutput:
-    """Output from an agent"""
+
+class AgentOutput(BaseModel):
+    """Output from an agent."""
     content: str
-    tools_used: List[str]
+    toolsused: List[str] = Field(default_factory=list)
     reasoning: str = ""
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
 
 class BaseAgent(ABC):
-    """
-    Base class for all specialized agents.
+    """Base class for specialized agents with LangChain MCP integration.
 
-    Agents process queries and return structured responses.
-    Each agent has specific expertise and tool requirements.
+    MCP (Model Context Protocol) integration is handled automatically via
+    LangChain's official langchain-mcp-adapters package.
     """
 
-    def __init__(
-        self,
-        manifest: AgentManifest,
-        ollama_url: str,
-    ):
+    # Class-level MCP client - shared across all agents
+    _mcp_client: Optional[MultiServerMCPClient] = None
+    _mcp_tools_cache: Optional[List] = None
+
+    def __init__(self, manifest: AgentManifest, ollama_url: str):
         self.manifest = manifest
         self.ollama_url = ollama_url
-        self.mcp_registry = get_mcp_registry()
-        self.llm = self._create_llm()
+        self.llm = self.create_llm()
+        self.llm_with_tools = None
+        logger.info(
+            f"Initialized {manifest.name} agent with model {manifest.model}"
+        )
 
-        logger.info(f"Initialized {manifest.name} agent with model {manifest.model}")
+    @classmethod
+    async def initialize_mcp_servers(cls):
+        """Initialize MCP servers once for all agents (class method).
 
-    def _create_llm(self) -> ChatOllama:
-        """Create LLM instance"""
+        This connects to all available MCP servers via LangChain's
+        MultiServerMCPClient and caches the tools.
+        """
+        if cls._mcp_client is not None:
+            return  # Already initialized
+
+        try:
+            # LangChain handles all MCP server connections automatically
+            cls._mcp_client = MultiServerMCPClient({
+                "filesystem": {
+                    "transport": "stdio",
+                    "command": "python",
+                    "args": ["-m", "mcp_server_filesystem"],
+                },
+                "git": {
+                    "transport": "stdio",
+                    "command": "python",
+                    "args": ["-m", "mcp_server_git"],
+                },
+            })
+
+            # Get all tools from all MCP servers (one line!)
+            cls._mcp_tools_cache = await cls._mcp_client.get_tools()
+            logger.info(
+                f"MCP: Connected to servers with {len(cls._mcp_tools_cache)} tools"
+            )
+        except Exception as e:
+            logger.error(f"Failed to initialize MCP servers: {e}", exc_info=True)
+            cls._mcp_tools_cache = []
+
+    async def setup_tools(self):
+        """Setup tools for this agent based on manifest.
+
+        Filters tools based on requiredTools and optionalTools,
+        then binds them to the LLM for native tool calling.
+        """
+        # Ensure MCP servers initialized
+        await self.initialize_mcp_servers()
+
+        all_tool_capabilities = self.manifest.requiredTools + self.manifest.optionalTools
+
+        if not all_tool_capabilities or not self._mcp_tools_cache:
+            # No tools needed or none available
+            self.llm_with_tools = self.llm
+            return
+
+        # Filter tools by capability match
+        # Tool names include their server prefix (e.g., "filesystem_list_files")
+        available_tools = [
+            tool
+            for tool in self._mcp_tools_cache
+            if any(cap in tool.name.lower() for cap in all_tool_capabilities)
+        ]
+
+        if available_tools:
+            # Bind tools to LLM for native tool calling
+            self.llm_with_tools = self.llm.bind_tools(available_tools)
+            logger.info(
+                f"{self.manifest.name}: Bound {len(available_tools)} tools "
+                f"from capabilities {all_tool_capabilities}"
+            )
+        else:
+            self.llm_with_tools = self.llm
+            if self.manifest.requiredTools:
+                logger.warning(
+                    f"{self.manifest.name}: No tools matched required capabilities: "
+                    f"{self.manifest.requiredTools}"
+                )
+
+    def create_llm(self) -> ChatOllama:
+        """Create LLM instance."""
         return ChatOllama(
             model=self.manifest.model,
             base_url=self.ollama_url,
-            temperature=self._get_temperature(),
+            temperature=self.get_temperature(),
             top_p=0.9,
         )
 
-    def _get_temperature(self) -> float:
-        """Get appropriate temperature for this agent"""
-        # Override in subclasses for different temperatures
+    def get_temperature(self) -> float:
+        """Get appropriate temperature for this agent."""
         return 0.2
 
-    def resolve_tools(self, context: str) -> Dict[str, Any]:
-        """Resolve available tools for this context"""
-        return self.mcp_registry.resolve_tools(
-            required=self.manifest.requiredTools,
-            optional=self.manifest.optionalTools,
-            context=context,
-            fallback_mode=self.manifest.fallbackMode,
-        )
+    async def process(self, query: str, context: str = "shell") -> AgentOutput:
+        """Process a query with automatic MCP tool integration."""
+        # Setup tools if not already done
+        if self.llm_with_tools is None:
+            await self.setup_tools()
 
-    def format_tools_info(self, resolved_tools: Dict[str, Any]) -> str:
-        """Format tool information for LLM context"""
-        if not resolved_tools["resolved"]:
-            return "No tools available in this context."
-
-        tools_list = ", ".join(resolved_tools["resolved"])
-        info = f"Available tools: {tools_list}"
-
-        if resolved_tools["missing_optional"]:
-            info += f"\n(Optional tools unavailable: {', '.join(resolved_tools['missing_optional'])})"
-
-        return info
-
-    async def process(
-        self,
-        query: str,
-        context: str = "shell",
-    ) -> AgentOutput:
-        """
-        Process a query and return structured output.
-
-        Must be implemented by subclasses.
-        """
-        resolved_tools = self.resolve_tools(context)
-
-        # Log tool resolution
-        logger.info(f"Agent '{self.manifest.name}' using tools: {resolved_tools['resolved']}")
-
-        # Call subclass implementation
-        result = await self._execute(query, context, resolved_tools)
-
-        # Ensure tools_used is populated
-        result.tools_used = resolved_tools["resolved"]
-
-        return result
+        return await self.execute(query, context, {})
 
     @abstractmethod
-    async def _execute(
-        self,
-        query: str,
-        context: str,
-        resolved_tools: Dict[str, Any],
+    async def execute(
+        self, query: str, context: str, resolved_tools: Dict[str, Any]
     ) -> AgentOutput:
         """Execute the agent. Must be implemented by subclasses."""
         pass
 
     def create_prompt(self, system_prompt: str) -> ChatPromptTemplate:
-        """Create a standardized prompt template"""
-        return ChatPromptTemplate.from_messages([
-            ("system", system_prompt),
-            ("human", "{input}"),
-        ])
+        """Create a standardized prompt template."""
+        return ChatPromptTemplate.from_messages(
+            [
+                ("system", system_prompt),
+                ("human", "{input}"),
+            ]
+        )

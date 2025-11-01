@@ -8,72 +8,63 @@ from ai_agent_runtime.utils import get_logger
 
 logger = get_logger(__name__)
 
+
 class SupervisorAgent(BaseAgent):
-    """
-    Task classification and routing agent.
+    """Task classifier - routes queries to appropriate specialist agents.
 
-    Analyzes queries to determine which specialist agent should handle them.
-    Classifies tasks as: CODE_TASK, RESEARCH_TASK, or HYBRID_TASK
+    Supervisors typically don't need external tools for classification.
     """
 
-    def _get_temperature(self) -> float:
-        """Supervisor should be deterministic"""
+    def get_temperature(self) -> float:
+        """Supervisor should be deterministic."""
         return 0.0
 
-    async def _execute(
-        self,
-        query: str,
-        context: str,
-        resolved_tools: Dict[str, Any],
+    async def execute(
+        self, query: str, context: str, resolved_tools: Dict[str, Any]
     ) -> AgentOutput:
-        """Classify the task"""
+        """Classify the task."""
+        try:
+            prompt = self.create_prompt(self.manifest.systemPrompt)
 
-        prompt = self.create_prompt(self.manifest.systemPrompt)
-        chain = prompt | self.llm
+            logger.info(f"Classifying query: {query[:60]}...")
 
-        logger.info(f"Classifying query: {query[:60]}...")
+            # No tools needed for supervisor - use LLM directly
+            response = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self.llm.invoke(
+                    prompt.format_messages(input=query)
+                ),
+            )
 
-        # Run in thread pool to avoid blocking
-        response = await asyncio.get_event_loop().run_in_executor(
-            None,
-            lambda: chain.invoke({"input": query})
-        )
+            response_text = response.content
+            classification = self.parse_classification(response_text)
+            reasoning = self.parse_reasoning(response_text)
 
-        response_text = response.content
+            logger.info(f"Classification: {classification}")
 
-        # Parse classification
-        classification = self._parse_classification(response_text)
-        reasoning = self._parse_reasoning(response_text)
+            return AgentOutput(
+                content=classification,
+                reasoning=reasoning,
+                metadata={"raw_response": response_text},
+            )
+        except Exception as e:
+            logger.error(f"Supervisor error: {e}", exc_info=True)
+            return AgentOutput(
+                content="ERROR",
+                reasoning=str(e),
+            )
 
-        logger.info(f"Classification: {classification}")
-        logger.info(f"Reasoning: {reasoning}")
+    def parse_classification(self, response: str) -> str:
+        """Parse classification from response."""
+        if "CODE_TASK" in response.upper():
+            return "CODE_TASK"
+        elif "RESEARCH_TASK" in response.upper():
+            return "RESEARCH_TASK"
+        elif "HYBRID_TASK" in response.upper():
+            return "HYBRID_TASK"
+        return response.split("\n")[0][:50]
 
-        return AgentOutput(
-            content=response_text,
-            tools_used=resolved_tools["resolved"],
-            reasoning=reasoning,
-            metadata={
-                "classification": classification,
-            }
-        )
-
-    def _parse_classification(self, response: str) -> str:
-        """Extract classification from response"""
-        for line in response.split("\n"):
-            if "CLASSIFICATION:" in line:
-                try:
-                    classification = line.split("CLASSIFICATION:")[1].strip().split()[0]
-                    return classification
-                except (IndexError, AttributeError):
-                    pass
-        return "CODE_TASK"  # Default fallback
-
-    def _parse_reasoning(self, response: str) -> str:
-        """Extract reasoning from response"""
-        for line in response.split("\n"):
-            if "REASONING:" in line:
-                try:
-                    return line.split("REASONING:")[1].strip()
-                except IndexError:
-                    pass
-        return ""
+    def parse_reasoning(self, response: str) -> str:
+        """Parse reasoning from response."""
+        lines = response.split("\n")
+        return "\n".join(lines[1:]) if len(lines) > 1 else response
