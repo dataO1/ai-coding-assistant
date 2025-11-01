@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ config, lib, pkgs, aiAgentRuntime ... }:
 
 let
   cfg = config.programs.aiAgent;
@@ -65,7 +65,7 @@ in
         Type = "simple";
 
         # Use absolute path to ai-agent-server binary from package
-        ExecStart = "${pkgs.ai-agent-runtime}/bin/ai-agent-server";
+        ExecStart = "${aiAgentRuntime}/bin/ai-agent-server";
 
         Restart = "on-failure";
         RestartSec = "10s";
