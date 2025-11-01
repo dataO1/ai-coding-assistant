@@ -169,9 +169,12 @@ EOF
           };
       };
 
-      homeManagerModules.default = { config, system, lib, pkgs, ... }:
+      homeManagerModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.programs.aiAgent;
+          system = "x86_64-linux";
+          pkgs = nixpkgs.legacyPackages.${system};
+          lib = nixpkgs.lib;
           aiAgentRuntime = self.packages.${system}.ai-agent-runtime;
 
           pipelineModule = lib.types.submodule {
