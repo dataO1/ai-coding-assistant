@@ -2,7 +2,7 @@
 
 let
   cfg = config.programs.aiAgent;
-  inherit system pkgs;
+  system = "x86_64-linux";
 
   pipelineModule = lib.types.submodule {
     options = {
