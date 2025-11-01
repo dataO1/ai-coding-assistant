@@ -44,7 +44,6 @@ orchestrator = MultiAgentOrchestrator(OLLAMA_URL, manifests.get("pipelines", {})
 class QueryRequest(BaseModel):
     query: str
     context: str = "shell"
-    pipeline: str | None = None
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
