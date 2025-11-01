@@ -181,7 +181,7 @@
 
     # Fix here: call the import with required params
     homeManagerModules.default = (import ./home-manager-module/default.nix) {
-      inherit pkgs lib aiAgentRuntime config;
+      inherit pkgs lib aiAgentRuntime;
     };
 
   });
