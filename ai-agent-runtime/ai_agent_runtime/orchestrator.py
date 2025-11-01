@@ -46,7 +46,7 @@ class MultiAgentOrchestrator:
     async def classifytask(self, state: OrchestratorState) -> OrchestratorState:
         # Calls supervisor asynchronously and updates state accordingly
         supervisor: SupervisorAgent = self.agents["supervisor"]
-        output = await supervisor._execute(state.query, state.context, {})
+        output = await supervisor.process(state.query, state.context)
         state.classification = output.content
         # Assume reasoning parsing done inside
         state.classificationreasoning = output.reasoning
@@ -54,13 +54,13 @@ class MultiAgentOrchestrator:
 
     async def executecodeexpert(self, state: OrchestratorState) -> OrchestratorState:
         agent: CodeExpertAgent = self.agents["codeexpert"]
-        output = await agent._execute(state.query, state.context, {})
+        output = await agent.process(state.query, state.context)
         state.codeexpertresult = output.content
         return state
 
     async def executeknowledgescout(self, state: OrchestratorState) -> OrchestratorState:
         agent: KnowledgeScoutAgent = self.agents["knowledgescout"]
-        output = await agent._execute(state.query, state.context, {})
+        output = await agent.process(state.query, state.context)
         state.knowledgeresult = output.content
         return state
 

@@ -70,6 +70,12 @@ EOF
           git
         ];
 
+        # set env variables
+        OLLAMA_BASE_URL=http://localhost:11434;
+        AGENT_SERVER_PORT=3000;
+        # AI_AGENT_MANIFESTS=%h/.config/ai-agent/manifests.json;
+        PYTHONUNBUFFERED=1;
+
         shellHook = ''
           echo "Install Python deps with: pip install langchain langchain-community langchain-openai fastapi uvicorn pydantic langgraph"
         '';
