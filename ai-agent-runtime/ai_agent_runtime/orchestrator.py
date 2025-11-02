@@ -5,6 +5,7 @@ from langgraph.graph import StateGraph, START, END
 from ai_agent_runtime.agents import AgentManifest, SupervisorAgent, CodeExpertAgent, KnowledgeScoutAgent
 from ai_agent_runtime.utils import get_logger
 from ai_agent_runtime.agents import AgentOutput
+from ai_agent_runtime.context import AgentContext
 
 logger = get_logger(__name__)
 
@@ -158,31 +159,46 @@ class MultiAgentOrchestrator:
 
         return graphbuilder.compile()
 
-    async def execute(self, query: str, context: str = "shell") -> Dict[str, Any]:
-        logger.info(f"Starting orchestration for query={query[:60]}, context={context}")
+    async def execute(
+        self,
+        query: str,
+        context: AgentContext  # Changed from str to AgentContext
+    ) -> Dict[str, Any]:
+        """Execute query through multi-agent pipeline with context awareness."""
 
-        try:
-            result = await self.graph.ainvoke(OrchestratorState(query=query,
-                                                                context=context))
-            logger.info(f"Orchestration complete. Path: {result.get('executionpath', [])}")
+        logger.info(
+            f"Starting orchestration for query={query[:60]}, "
+            f"context={context.source.value if isinstance(context, AgentContext) else context}"
+        )
 
-            return {
-                "query": query,
-                "context": context,
-                "response": result.get("finalresponse", "No response generated."),
-                "classification": result.get("classification", ""),
-                "toolsused": list(set(result.get("toolsused", []))),
-                "executionpath": result.get("executionpath", []),
-                "errors": result.get("errors", []),
-            }
-        except Exception as e:
-            logger.error(f"Orchestration error: {e}", exc_info=True)
-            return {
-                "query": query,
-                "context": context,
-                "response": f"Error: {str(e)}",
-                "classification": "",
-                "toolsused": [],
-                "executionpath": [],
-                "errors": [str(e)],
-            }
+        state = OrchestratorState(
+            query=query,
+            context=context.source.value if isinstance(context, AgentContext) else str(context),
+        )
+
+        # Supervisor classification
+        supervisor_result = await self.supervisor.process(query, context)
+        classification = supervisor_result.content
+
+        state.update(AgentOutput(
+            content=classification,
+            reasoning=supervisor_result.reasoning,
+        ))
+        state.executionpath.append("classify")
+
+        # Route to specialist agent based on classification
+        specialist_agent = self._route_to_specialist(classification)
+
+        if specialist_agent:
+            specialist_result = await specialist_agent.process(query, context)  # Pass context
+            state.update(specialist_result)
+            state.executionpath.append(specialist_agent.manifest.name)
+
+        logger.info(f"Orchestration complete. Path: {state.executionpath}")
+
+        return {
+            "response": state.finalresponse,
+            "classification": state.classification,
+            "tools_used": state.toolsused,
+            "execution_path": state.executionpath,
+        }

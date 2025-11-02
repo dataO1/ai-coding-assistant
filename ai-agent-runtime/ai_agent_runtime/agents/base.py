@@ -12,7 +12,8 @@ from langchain_ollama import ChatOllama  # ✅ Use this instead
 from ai_agent_runtime.utils import get_logger
 
 logger = get_logger(__name__)
-
+from ai_agent_runtime.middleware import FileAccessMiddleware
+from ai_agent_runtime.context import AgentContext
 
 class AgentContext(str, Enum):
     """Available execution contexts."""
@@ -52,12 +53,13 @@ class BaseAgent(ABC):
     _mcp_tools_cache: Optional[List[BaseTool]] = None
     _mcp_servers_config: Optional[Dict] = None
 
-    def __init__(self, manifest: AgentManifest, ollama_url: str):
+     def __init__(self, manifest: AgentManifest, ollama_url: str):
         self.manifest = manifest
         self.ollama_url = ollama_url
         self.llm = self.create_llm()
         self.tools: List[BaseTool] = []
         self.agent = None
+        self.agent_context: Optional[AgentContext] = None  # NEW
         logger.info(
             f"Initialized {manifest.name} agent with model {manifest.model}"
         )
@@ -98,8 +100,15 @@ class BaseAgent(ABC):
             logger.error(f"Failed to initialize MCP servers: {e}", exc_info=True)
             cls._mcp_tools_cache = []
 
-    def setup_agent(self):
-        """Setup agent using LangChain v1 create_agent."""
+    def setup_agent(self, context: Optional[AgentContext] = None):
+        """Setup agent with optional context for file access control.
+
+        Args:
+            context: AgentContext specifying working directory and source
+        """
+        # Store context for later use
+        self.agent_context = context or AgentContext()
+
         all_tool_names = (
             self.manifest.requiredTools + self.manifest.optionalTools
         )
@@ -124,29 +133,37 @@ class BaseAgent(ABC):
                 f"{[t.name for t in self.tools]}"
             )
 
-        # Create agent with create_agent - handles tool calling automatically
+        # Create middleware for file access control
+        middleware = [FileAccessMiddleware(self.agent_context)]
+
+        # Create agent with create_agent - now with middleware!
         self.agent = create_agent(
             model=self.llm,
             system_prompt=self.manifest.systemPrompt,
             tools=self.tools,
+            middleware=middleware,  # NEW: Add middleware
         )
 
-    async def process_with_tools(self, query: str) -> str:
-        """Process query using LangChain v1 agent."""
+    async def process_with_tools(
+        self,
+        query: str,
+        context: Optional[AgentContext] = None
+    ) -> str:
+        """Process query using LangChain v1 agent with context-aware file access."""
         # Setup agent if needed
         if self.agent is None:
             await self.initialize_mcp_servers(self._mcp_servers_config)
-            self.setup_agent()
+            self.setup_agent(context)
 
         try:
             logger.info(f"{self.manifest.name}: Processing query")
 
-            # Use native async invoke - create_agent returns a Runnable
+            # Use native async invoke
             result = await self.agent.ainvoke({
                 "messages": [{"role": "user", "content": query}]
             })
 
-            # Extract output from result
+            # Extract output
             if isinstance(result, dict) and "messages" in result:
                 messages = result["messages"]
                 if messages:
@@ -175,9 +192,13 @@ class BaseAgent(ABC):
         """Get appropriate temperature for this agent."""
         return 0.2
 
-    async def process(self, query: str, context: str = "shell") -> AgentOutput:
-        """Process a query with automatic MCP tool integration."""
-        content = await self.process_with_tools(query)
+    async def process(
+        self,
+        query: str,
+        context: Optional[AgentContext] = None
+    ) -> AgentOutput:
+        """Process a query with context-aware file access."""
+        content = await self.process_with_tools(query, context)
         return await self.execute(query, context, {}, content)
 
     @abstractmethod

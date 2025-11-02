@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from ai_agent_runtime.orchestrator import MultiAgentOrchestrator
 from ai_agent_runtime.utils import get_logger
 from ai_agent_runtime.agents import BaseAgent
+from ai_agent_runtime.context import AgentContext, ContextSource
 
 logger = get_logger(__name__)
 
@@ -44,14 +45,15 @@ orchestrator = MultiAgentOrchestrator(
 
 class QueryRequest(BaseModel):
     query: str
-    context: str = "shell"
+    context: str = "shell"  # Default to shell
+    working_dir: str = ""   # Empty = use home directory
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting AI Agent on port {AGENT_PORT}")
 
-    # Initialize MCP servers - using native async
+    # Initialize MCP servers
     await BaseAgent.initialize_mcp_servers(
         mcp_servers_config=manifests.get("mcpServers", {})
     )
@@ -110,9 +112,40 @@ async def list_pipelines():
 @app.post("/api/query")
 async def query_endpoint(request: QueryRequest):
     try:
-        # Use native async orchestrator
-        result = await orchestrator.execute(request.query, request.context)
+        # Validate context source
+        try:
+            source = ContextSource(request.context)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid context. Must be one of: {', '.join([s.value for s in ContextSource])}"
+            )
+
+        # Determine working directory
+        working_dir = request.working_dir or str(Path.home())
+        if not Path(working_dir).is_dir():
+            logger.warning(f"Working dir {working_dir} not found, using home")
+            working_dir = str(Path.home())
+
+        # Create agent context
+        agent_context = AgentContext(
+            source=source,
+            working_dir=working_dir
+        )
+
+        logger.info(
+            f"Query from {agent_context.source.value} context "
+            f"({agent_context.working_dir}): {request.query[:60]}..."
+        )
+
+        # Execute query with context
+        result = await orchestrator.execute(
+            request.query,
+            agent_context  # Pass context to orchestrator
+        )
         return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Query error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -136,12 +169,18 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: dict):
-    """OpenAI-compatible chat endpoint for Continue.dev, Avante"""
+    """OpenAI-compatible chat endpoint"""
     messages = request.get("messages", [])
     query_text = messages[-1]["content"] if messages else ""
 
     try:
-        result = await orchestrator.execute(query_text, "nvim")
+        # Default to shell context for chat completions
+        agent_context = AgentContext(
+            source=ContextSource.SHELL,
+            working_dir=str(Path.home())
+        )
+
+        result = await orchestrator.execute(query_text, agent_context)
         return {
             "id": "local",
             "object": "chat.completion",

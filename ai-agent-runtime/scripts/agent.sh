@@ -25,7 +25,7 @@ fi
 
 RESPONSE=$(curl -s -X POST "$AGENT_URL/api/query" \
   -H "Content-Type: application/json" \
-  -d "{\"query\": \"$QUERY\", \"context\": \"shell\"}" 2>&1) || true
+  -d "{\"query\": \"$QUERY\", \"context\": \"shell\, \"working_dir\": \"$(pwd)\"}" 2>&1) || true
 
 if echo "$RESPONSE" | grep -q "^{"; then
   echo "$RESPONSE" | jq -r '.response // .error // .'
