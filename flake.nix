@@ -256,7 +256,10 @@
           };
 
           config = lib.mkIf cfg.enable {
-            home.file.".config/ai-agent/manifests.json".text = builtins.toJSON { pipelines = cfg.pipelines; };
+            home.file.".config/ai-agent/manifests.json".text = builtins.toJSON {
+              mcpServers = cfg.mcpServers;
+              pipelines = cfg.pipelines;
+            };
             home.sessionVariables = {
               AI_AGENT_MANIFESTS = "${config.home.homeDirectory}/.config/ai-agent/manifests.json";
               AI_AGENT_SERVER_URL = cfg.serverUrl;
