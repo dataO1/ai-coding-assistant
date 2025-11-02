@@ -173,7 +173,7 @@
         {
           options.services.aiAgent = {
             enable = lib.mkEnableOption "AI Agent Server with MCP";
-            gpuAcceleration = lib.mkOption { type = lib.types.boolean; default =
+            gpuAcceleration = lib.mkOption { type = lib.types.bool; default =
               false; description = "GPU Acceleration"; };
             port = lib.mkOption { type = lib.types.port; default = 3000; description = "Agent server port"; };
             ollamaHost = lib.mkOption { type = lib.types.str; default = "127.0.0.1"; description = "Ollama server host"; };
