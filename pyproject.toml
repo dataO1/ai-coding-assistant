@@ -5,10 +5,11 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "langchain",
+  "langchain==1.0.3",
   "langchain-community",
   "langchain-core",
   "langchain-ollama",
+  "langchain-experimental",
   "langgraph",
   "fastapi",
   "uvicorn",
