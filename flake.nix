@@ -173,6 +173,8 @@
         {
           options.services.aiAgent = {
             enable = lib.mkEnableOption "AI Agent Server with MCP";
+            gpuAcceleration = lib.mkOption { type = lib.types.boolesn; default =
+              false; description = "GPU Acceleration"; };
             port = lib.mkOption { type = lib.types.port; default = 3000; description = "Agent server port"; };
             ollamaHost = lib.mkOption { type = lib.types.str; default = "127.0.0.1"; description = "Ollama server host"; };
             ollamaPort = lib.mkOption { type = lib.types.port; default = 11434; description = "Ollama server port"; };
@@ -190,6 +192,8 @@
           config = lib.mkIf cfg.enable {
             services.ollama = {
               enable = true;
+              acceleration = cfg.gpuAcceleration;
+
               host = cfg.ollamaHost;
               port = cfg.ollamaPort;
               loadModels = lib.attrValues cfg.models;
