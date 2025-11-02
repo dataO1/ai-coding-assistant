@@ -123,6 +123,7 @@
           OLLAMA_BASE_URL = "http://localhost:11434";
           AGENT_SERVER_PORT = "3000";
           PYTHONUNBUFFERED = "1";
+          MCP_HUB_URL="http://localhost:37373/mcp";
         };
 
         shellHook = ''

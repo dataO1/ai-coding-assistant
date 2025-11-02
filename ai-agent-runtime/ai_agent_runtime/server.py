@@ -13,6 +13,7 @@ import uvicorn
 
 from ai_agent_runtime.orchestrator import MultiAgentOrchestrator
 from ai_agent_runtime.utils import get_logger
+from ai_agent_runtime.agents import BaseAgent
 
 logger = get_logger(__name__)
 
@@ -48,6 +49,7 @@ class QueryRequest(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting AI Agent on port {AGENT_PORT}")
+    await BaseAgent.initialize_mcp_servers()
     yield
     logger.info("Shutting down AI Agent")
 
@@ -63,6 +65,22 @@ async def health():
         "status": "healthy",
         "pipelines": len(manifests.get("pipelines", {})),
     }
+
+@app.get("/tools")
+async def list_tools():
+    """List all available MCP tools via mcp-hub"""
+    if BaseAgent._mcp_tools_cache:
+        return {
+            "total": len(BaseAgent._mcp_tools_cache),
+            "tools": [
+                {
+                    "name": tool.name,
+                    "description": tool.description
+                }
+                for tool in BaseAgent._mcp_tools_cache
+            ]
+        }
+    return {"total": 0, "tools": []}
 
 @app.get("/api/pipelines")
 async def list_pipelines():

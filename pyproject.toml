@@ -8,6 +8,7 @@ dependencies = [
   "langchain",
   "langchain-community",
   "langchain-core",
+  "langchain-ollama",
   "langgraph",
   "fastapi",
   "uvicorn",
