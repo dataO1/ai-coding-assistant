@@ -1,12 +1,10 @@
 # ai_agent_runtime/server.py
-from fastapi.responses import JSONResponse
 import os
 import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import uvicorn
 
 from ai_agent_runtime.orchestrator import MultiAgentOrchestrator
 from ai_agent_runtime.utils import get_logger
@@ -14,10 +12,7 @@ from ai_agent_runtime.agents import BaseAgent
 
 logger = get_logger(__name__)
 
-# ============================================================================
-# Configuration - FROM ENVIRONMENT (set by systemd or shell)
-# ============================================================================
-
+# Configuration
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 AGENT_PORT = int(os.getenv("AGENT_SERVER_PORT", "3000"))
 MANIFESTS_PATH = Path(
@@ -29,7 +24,7 @@ MANIFESTS_PATH = Path(
 
 logger.info(f"Loading manifests from: {MANIFESTS_PATH}")
 
-# Load user-defined pipelines AND MCP server config
+# Load manifests
 manifests = {}
 if MANIFESTS_PATH.exists():
     with open(MANIFESTS_PATH) as f:
@@ -46,9 +41,6 @@ orchestrator = MultiAgentOrchestrator(
     manifests.get("pipelines", {})
 )
 
-# ============================================================================
-# FastAPI App
-# ============================================================================
 
 class QueryRequest(BaseModel):
     query: str
@@ -59,7 +51,7 @@ class QueryRequest(BaseModel):
 async def lifespan(app: FastAPI):
     logger.info(f"Starting AI Agent on port {AGENT_PORT}")
 
-    # Initialize MCP servers with user config from manifests.json
+    # Initialize MCP servers - using native async
     await BaseAgent.initialize_mcp_servers(
         mcp_servers_config=manifests.get("mcpServers", {})
     )
@@ -118,8 +110,9 @@ async def list_pipelines():
 @app.post("/api/query")
 async def query_endpoint(request: QueryRequest):
     try:
+        # Use native async orchestrator
         result = await orchestrator.execute(request.query, request.context)
-        return JSONResponse(status_code=200, content=result)
+        return result
     except Exception as e:
         logger.error(f"Query error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -175,4 +168,5 @@ async def chat_completions(request: dict):
 
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT, log_level="info")
