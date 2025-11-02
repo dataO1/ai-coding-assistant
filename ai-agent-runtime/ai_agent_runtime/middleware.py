@@ -1,9 +1,9 @@
 # ai_agent_runtime/middleware.py
-from typing import Callable, Any, Dict
+from typing import Callable, Any
 from pathlib import Path
-from langchain.agents.middleware import AgentMiddleware
-from langchain_core.tools.base import ToolException
+import asyncio
 import logging
+from langchain.agents.middleware import AgentMiddleware
 
 from ai_agent_runtime.context import AgentContext
 
@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 class FileAccessMiddleware(AgentMiddleware):
     """Middleware that enforces context-based file access control.
 
-    This middleware intercepts tool calls and validates file paths
-    against the current AgentContext's allowed roots.
+    Supports both sync and async contexts for LangChain 1.x agents.
     """
 
     def __init__(self, context: AgentContext):
@@ -34,15 +33,26 @@ class FileAccessMiddleware(AgentMiddleware):
         request: Any,
         handler: Callable[[Any], Any],
     ) -> Any:
-        """Intercept tool calls and validate file access.
+        """Synchronous tool call wrapper."""
+        return self._validate_and_execute(request, handler)
 
-        Args:
-            request: Tool call request
-            handler: Original tool handler
+    async def awrap_tool_call(
+        self,
+        request: Any,
+        handler: Callable[[Any], Any],
+    ) -> Any:
+        """Asynchronous tool call wrapper for async agents.
 
-        Returns:
-            Tool result or error message
+        This method is called when the agent uses ainvoke().
         """
+        return await self._avalidate_and_execute(request, handler)
+
+    def _validate_and_execute(
+        self,
+        request: Any,
+        handler: Callable[[Any], Any],
+    ) -> Any:
+        """Validate file paths and execute tool."""
         tool_name = request.tool_call.get("name", "unknown")
         tool_input = request.tool_call.get("args", {})
 
@@ -59,7 +69,6 @@ class FileAccessMiddleware(AgentMiddleware):
         }
 
         if tool_name in filesystem_tools:
-            # Get paths to validate
             path_fields = filesystem_tools[tool_name]
 
             for field in path_fields:
@@ -73,23 +82,68 @@ class FileAccessMiddleware(AgentMiddleware):
                             f"path '{path}' not in allowed roots {self.context.allowed_roots}"
                         )
 
-                        # Return error message to agent
                         return {
                             "type": "error",
                             "content": f"Access denied: Path '{path}' is not accessible in {self.context.source.value} context. "
                                      f"Allowed directories: {', '.join(self.context.allowed_roots)}",
                         }
 
-        # Tool call is allowed, proceed
         logger.debug(f"Tool call allowed: {tool_name}({tool_input})")
         return handler(request)
+
+    async def _avalidate_and_execute(
+        self,
+        request: Any,
+        handler: Callable[[Any], Any],
+    ) -> Any:
+        """Async version of validation and execution."""
+        # Validation logic is the same, just async-aware handler call
+        tool_name = request.tool_call.get("name", "unknown")
+        tool_input = request.tool_call.get("args", {})
+
+        filesystem_tools = {
+            "read_file": ["path"],
+            "write_file": ["path"],
+            "edit_file": ["path"],
+            "create_directory": ["path"],
+            "list_directory": ["path"],
+            "move_file": ["source", "destination"],
+            "search_files": ["path"],
+            "get_file_info": ["path"],
+        }
+
+        if tool_name in filesystem_tools:
+            path_fields = filesystem_tools[tool_name]
+
+            for field in path_fields:
+                if field in tool_input:
+                    path = tool_input[field]
+
+                    if not self._is_path_allowed(path):
+                        logger.warning(
+                            f"Access denied for {tool_name}: "
+                            f"path '{path}' not in allowed roots {self.context.allowed_roots}"
+                        )
+
+                        return {
+                            "type": "error",
+                            "content": f"Access denied: Path '{path}' is not accessible in {self.context.source.value} context. "
+                                     f"Allowed directories: {', '.join(self.context.allowed_roots)}",
+                        }
+
+        logger.debug(f"Tool call allowed: {tool_name}({tool_input})")
+
+        # Handle both sync and async handlers
+        result = handler(request)
+        if asyncio.iscoroutine(result):
+            return await result
+        return result
 
     def _is_path_allowed(self, path: str) -> bool:
         """Check if a path is allowed."""
         try:
             target_path = Path(path).resolve()
 
-            # Check against all allowed roots
             for root in self.context.allowed_roots:
                 allowed_root = Path(root).resolve()
                 try:

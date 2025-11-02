@@ -31,8 +31,6 @@ class AgentContext(BaseModel):
             # Shell context: allow working dir + home + tmp
             return [
                 str(working_path),
-                str(Path.home()),
-                "/tmp",
             ]
         elif self.source == ContextSource.NVIM:
             # Nvim: only working directory (buffer context)

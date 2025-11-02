@@ -2,25 +2,17 @@
 import os
 from abc import ABC, abstractmethod
 from typing import Dict, Any, List, Optional
-from enum import Enum
 from pydantic import BaseModel, Field
 from langchain.agents import create_agent
 from langchain.tools import BaseTool
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langchain_ollama import ChatOllama  # ✅ Use this instead
+from langchain_ollama import ChatOllama
 
 from ai_agent_runtime.utils import get_logger
+from ai_agent_runtime.context import AgentContext
+from ai_agent_runtime.middleware import FileAccessMiddleware
 
 logger = get_logger(__name__)
-from ai_agent_runtime.middleware import FileAccessMiddleware
-from ai_agent_runtime.context import AgentContext
-
-class AgentContext(str, Enum):
-    """Available execution contexts."""
-    NVIM = "nvim"
-    VSCODE = "vscode"
-    SHELL = "shell"
-    WEB = "web"
 
 
 class AgentManifest(BaseModel):
@@ -45,7 +37,7 @@ class AgentOutput(BaseModel):
 class BaseAgent(ABC):
     """Base class for specialized agents with LangChain MCP integration.
 
-    Uses LangChain v1 create_agent with ChatOllama (no experimental deps).
+    Uses LangChain v1 create_agent with native tool calling and context-aware middleware.
     """
 
     # Class-level MCP client - shared across all agents
@@ -59,7 +51,7 @@ class BaseAgent(ABC):
         self.llm = self.create_llm()
         self.tools: List[BaseTool] = []
         self.agent = None
-        self.agent_context: Optional[AgentContext] = None  # NEW
+        self.agent_context: Optional[AgentContext] = None
         logger.info(
             f"Initialized {manifest.name} agent with model {manifest.model}"
         )
@@ -101,19 +93,22 @@ class BaseAgent(ABC):
             cls._mcp_tools_cache = []
 
     def setup_agent(self, context: Optional[AgentContext] = None):
-        """Setup agent with optional context for file access control.
+        """Setup agent using LangChain v1 create_agent with middleware.
 
         Args:
-            context: AgentContext specifying working directory and source
+            context: AgentContext with working_dir and source
         """
-        # Store context for later use
         self.agent_context = context or AgentContext()
 
         all_tool_names = (
             self.manifest.requiredTools + self.manifest.optionalTools
         )
 
-        logger.info(f"Requested tool names: {all_tool_names}")
+        logger.info(
+            f"Requested tool names: {all_tool_names} "
+            f"(context: {self.agent_context.source.value}, "
+            f"working_dir: {self.agent_context.working_dir})"
+        )
 
         if not all_tool_names or not self._mcp_tools_cache:
             logger.warning(
@@ -133,32 +128,73 @@ class BaseAgent(ABC):
                 f"{[t.name for t in self.tools]}"
             )
 
-        # Create middleware for file access control
+        # Enhance system prompt with context information
+        enhanced_prompt = self._enhance_system_prompt(
+            self.manifest.systemPrompt,
+            self.agent_context
+        )
+
+        logger.debug(f"Enhanced system prompt:\n{enhanced_prompt}")
+
+        # Create middleware for context-aware file access control
         middleware = [FileAccessMiddleware(self.agent_context)]
 
-        # Create agent with create_agent - now with middleware!
+        # Create agent with enhanced context-aware prompt and middleware
         self.agent = create_agent(
             model=self.llm,
-            system_prompt=self.manifest.systemPrompt,
+            system_prompt=enhanced_prompt,
             tools=self.tools,
-            middleware=middleware,  # NEW: Add middleware
+            middleware=middleware,  # ✅ MIDDLEWARE ENFORCES working_dir
         )
+
+    def _enhance_system_prompt(
+        self,
+        base_prompt: str,
+        context: AgentContext
+    ) -> str:
+        """Enhance system prompt with context information.
+
+        This informs the LLM about:
+        1. Current working directory
+        2. Allowed paths to access
+        3. Context source (shell, nvim, etc.)
+        """
+        context_info = f"""
+EXECUTION CONTEXT:
+- Source: {context.source.value}
+- Working Directory: {context.working_dir}
+- Allowed Directories: {', '.join(context.allowed_roots)}
+
+When using file tools:
+1. Prefer relative paths like "hello.py" (will be resolved from working directory)
+2. Or use absolute paths within the allowed directories
+3. All file operations MUST be within allowed directories:
+   {', '.join(context.allowed_roots)}
+"""
+        return base_prompt + "\n" + context_info
 
     async def process_with_tools(
         self,
         query: str,
         context: Optional[AgentContext] = None
     ) -> str:
-        """Process query using LangChain v1 agent with context-aware file access."""
-        # Setup agent if needed
-        if self.agent is None:
+        """Process query using LangChain v1 agent with context-aware middleware.
+
+        The middleware enforces file access control based on the working_dir.
+        """
+        # Setup agent if needed (or if context changed)
+        if self.agent is None or (context and context != self.agent_context):
             await self.initialize_mcp_servers(self._mcp_servers_config)
             self.setup_agent(context)
 
         try:
-            logger.info(f"{self.manifest.name}: Processing query")
+            logger.info(
+                f"{self.manifest.name}: Processing query "
+                f"(context: {self.agent_context.source.value}, "
+                f"allowed_roots: {self.agent_context.allowed_roots})"
+            )
 
-            # Use native async invoke
+            # Use native async invoke - create_agent returns a Runnable
             result = await self.agent.ainvoke({
                 "messages": [{"role": "user", "content": query}]
             })
@@ -197,7 +233,7 @@ class BaseAgent(ABC):
         query: str,
         context: Optional[AgentContext] = None
     ) -> AgentOutput:
-        """Process a query with context-aware file access."""
+        """Process a query with automatic MCP tool integration and context enforcement."""
         content = await self.process_with_tools(query, context)
         return await self.execute(query, context, {}, content)
 
@@ -205,7 +241,7 @@ class BaseAgent(ABC):
     async def execute(
         self,
         query: str,
-        context: str,
+        context: Optional[AgentContext],
         resolved_tools: Dict[str, Any],
         agent_response: str = ""
     ) -> AgentOutput:
