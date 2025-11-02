@@ -111,13 +111,12 @@
           nodejs_22  # For npm packages
           self.packages.${system}.mcp-hub
           aiAgentRuntime
-          agent-shell
         ];
 
-        # packages = [
-        #   aiAgentRuntime
-        #   agent-shell
-        # ];
+        packages = [
+          aiAgentRuntime
+          agent-shell
+        ];
 
         env = {
           OLLAMA_BASE_URL = "http://localhost:11434";

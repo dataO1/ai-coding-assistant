@@ -128,9 +128,12 @@ class BaseAgent(ABC):
         all_tool_capabilities = (
             self.manifest.requiredTools + self.manifest.optionalTools
         )
+        logger.info( f"All Tool Capabilities: {all_tool_capabilities}")
+        # logger.info( f"Tools Cache: {self._mcp_tools_cache}")
 
         if not all_tool_capabilities or not self._mcp_tools_cache:
             self.llm_with_tools = self.llm
+            logger.info("No tool capabilities, invoke LLM without tools")
             return
 
         # Filter tools by capability match
