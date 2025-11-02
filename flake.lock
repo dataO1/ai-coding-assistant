@@ -1,5 +1,26 @@
 {
   "nodes": {
+    "flake-parts": {
+      "inputs": {
+        "nixpkgs-lib": [
+          "mcp-hub-repo",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1743550720,
+        "narHash": "sha256-hIshGgKZCgWh6AYJpJmRgFdR3WUbkY04o82X05xqQiY=",
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "rev": "c621e8422220273271f52058f618c94e405bb0f5",
+        "type": "github"
+      },
+      "original": {
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "type": "github"
+      }
+    },
     "flake-utils": {
       "inputs": {
         "systems": "systems"
@@ -18,71 +39,42 @@
         "type": "github"
       }
     },
-    "git-mcp-server-repo": {
-      "flake": false,
+    "mcp-hub-repo": {
+      "inputs": {
+        "flake-parts": "flake-parts",
+        "nixpkgs": "nixpkgs"
+      },
       "locked": {
-        "lastModified": 1761632098,
-        "narHash": "sha256-7h9jcXE/6YUAfKofcnWG+UlKQFYDatgY9da00cQ2n4A=",
-        "owner": "cyanheads",
-        "repo": "git-mcp-server",
-        "rev": "ac238b25dd579f973f19eb26f8ba8b20b5360766",
+        "lastModified": 1755841689,
+        "narHash": "sha256-KakvXZf0vjdqzyT+LsAKHEr4GLICGXPmxl1hZ3tI7Yg=",
+        "owner": "ravitemer",
+        "repo": "mcp-hub",
+        "rev": "9c7670a4c341ed3cf738a6242c0fde1cea40bccf",
         "type": "github"
       },
       "original": {
-        "owner": "cyanheads",
-        "repo": "git-mcp-server",
-        "type": "github"
-      }
-    },
-    "lsp-mcp-repo": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1753116181,
-        "narHash": "sha256-gJ9TwX8GZ9h0TRFbtkR8SMDCDI6zzHisoU442a4cqKg=",
-        "owner": "Tritlo",
-        "repo": "lsp-mcp",
-        "rev": "a37170a1bbd6b7fe99c8021707b6ff0dbbaed376",
-        "type": "github"
-      },
-      "original": {
-        "owner": "Tritlo",
-        "repo": "lsp-mcp",
-        "type": "github"
-      }
-    },
-    "mcp-docs-rag-repo": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1741643707,
-        "narHash": "sha256-0/wPed3Dl9ZKRLevV/MHVoDyxO1k3D/T5WKZ/GrUi2A=",
-        "owner": "kazuph",
-        "repo": "mcp-docs-rag",
-        "rev": "c7dcf352f115c707a7d3c3c2badadcd3e586431a",
-        "type": "github"
-      },
-      "original": {
-        "owner": "kazuph",
-        "repo": "mcp-docs-rag",
-        "type": "github"
-      }
-    },
-    "mcp-filesystem-server-repo": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1751233020,
-        "narHash": "sha256-59yjOAXjvt6Va804bfOSPJ7G71apOP90Nnd6og5DzhI=",
-        "owner": "mark3labs",
-        "repo": "mcp-filesystem-server",
-        "rev": "830bc892adf9421d496c8192e0a7e8048892fbd4",
-        "type": "github"
-      },
-      "original": {
-        "owner": "mark3labs",
-        "repo": "mcp-filesystem-server",
+        "owner": "ravitemer",
+        "repo": "mcp-hub",
         "type": "github"
       }
     },
     "nixpkgs": {
+      "locked": {
+        "lastModified": 1743689281,
+        "narHash": "sha256-y7Hg5lwWhEOgflEHRfzSH96BOt26LaYfrYWzZ+VoVdg=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "2bfc080955153be0be56724be6fa5477b4eefabb",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
+    "nixpkgs_2": {
       "locked": {
         "lastModified": 1748026580,
         "narHash": "sha256-rWtXrcIzU5wm/C8F9LWvUfBGu5U5E7cFzPYT1pHIJaQ=",
@@ -101,12 +93,8 @@
     "root": {
       "inputs": {
         "flake-utils": "flake-utils",
-        "git-mcp-server-repo": "git-mcp-server-repo",
-        "lsp-mcp-repo": "lsp-mcp-repo",
-        "mcp-docs-rag-repo": "mcp-docs-rag-repo",
-        "mcp-filesystem-server-repo": "mcp-filesystem-server-repo",
-        "nixpkgs": "nixpkgs",
-        "web-search-mcp-repo": "web-search-mcp-repo"
+        "mcp-hub-repo": "mcp-hub-repo",
+        "nixpkgs": "nixpkgs_2"
       }
     },
     "systems": {
@@ -121,22 +109,6 @@
       "original": {
         "owner": "nix-systems",
         "repo": "default",
-        "type": "github"
-      }
-    },
-    "web-search-mcp-repo": {
-      "flake": false,
-      "locked": {
-        "lastModified": 1761744850,
-        "narHash": "sha256-p8jnBbSWpHhG7CooBCvA6cEIVKBDuCL3J4twG6vi0uc=",
-        "owner": "modelcontextprotocol",
-        "repo": "servers",
-        "rev": "c7c549711b1577227d0ff8ff7c67fdbf7e4a0225",
-        "type": "github"
-      },
-      "original": {
-        "owner": "modelcontextprotocol",
-        "repo": "servers",
         "type": "github"
       }
     }

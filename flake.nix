@@ -4,106 +4,20 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/25.05";
     flake-utils.url = "github:numtide/flake-utils";
-
-    # MCP Servers (5 recommended)
-    git-mcp-server-repo = { url = "github:cyanheads/git-mcp-server"; flake = false; };
-    lsp-mcp-repo = { url = "github:Tritlo/lsp-mcp"; flake = false; };
-    mcp-filesystem-server-repo = { url = "github:mark3labs/mcp-filesystem-server"; flake = false; };
-    mcp-docs-rag-repo = { url = "github:kazuph/mcp-docs-rag"; flake = false; };
-    web-search-mcp-repo = { url = "github:modelcontextprotocol/servers"; flake = false; };
+    mcp-hub-repo.url = github:ravitemer/mcp-hub;
   };
 
   outputs =
     { self
     , nixpkgs
     , flake-utils
-    , git-mcp-server-repo
-    , lsp-mcp-repo
-    , mcp-filesystem-server-repo
-    , mcp-docs-rag-repo
-    , web-search-mcp-repo
+    , mcp-hub-repo
+    ,
     }:
     flake-utils.lib.eachDefaultSystem (system:
     let
       pkgs = nixpkgs.legacyPackages.${system};
       lib = nixpkgs.lib;
-
-      # ============================================================================
-      # MCP SERVERS - BUILD FROM SOURCE
-      # ============================================================================
-
-      git-mcp-server = pkgs.buildNpmPackage {
-        pname = "git-mcp-server";
-        version = "0.1.0";
-        src = git-mcp-server-repo;
-        npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-        build = "npm run build || true";
-        postInstall = ''
-          mkdir -p $out/bin
-          cat > $out/bin/git-mcp-server << 'EOF'
-          #!/usr/bin/env node
-          require('${git-mcp-server-repo}/dist/index.js');
-          EOF
-          chmod +x $out/bin/git-mcp-server
-        '';
-      };
-
-      lsp-mcp = pkgs.buildNpmPackage {
-        pname = "lsp-mcp";
-        version = "0.1.0";
-        src = lsp-mcp-repo;
-        npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-        build = "npm run build || true";
-        postInstall = ''
-          mkdir -p $out/bin
-          cat > $out/bin/lsp-mcp << 'EOF'
-          #!/usr/bin/env node
-          require('${lsp-mcp-repo}/dist/index.js');
-          EOF
-          chmod +x $out/bin/lsp-mcp
-        '';
-      };
-
-      mcp-filesystem-server = pkgs.buildGoModule {
-        pname = "mcp-filesystem-server";
-        version = "0.11.1";
-        src = mcp-filesystem-server-repo;
-        vendorHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-        subPackages = [ "." ];
-        ldflags = [ "-s" "-w" "-X main.Version=0.11.1" ];
-      };
-
-      mcp-docs-rag = pkgs.buildNpmPackage {
-        pname = "mcp-docs-rag";
-        version = "0.1.0";
-        src = mcp-docs-rag-repo;
-        npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-        build = "npm run build || true";
-        postInstall = ''
-          mkdir -p $out/bin
-          cat > $out/bin/mcp-docs-rag << 'EOF'
-          #!/usr/bin/env node
-          require('${mcp-docs-rag-repo}/dist/index.js');
-          EOF
-          chmod +x $out/bin/mcp-docs-rag
-        '';
-      };
-
-      web-search-mcp = pkgs.buildNpmPackage {
-        pname = "web-search-mcp";
-        version = "0.1.0";
-        src = "${web-search-mcp-repo}/src/web-search";
-        npmDepsHash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
-        build = "npm run build || true";
-        postInstall = ''
-          mkdir -p $out/bin
-          cat > $out/bin/web-search-mcp << 'EOF'
-          #!/usr/bin/env node
-          require('${web-search-mcp-repo}/src/web-search/dist/index.js');
-          EOF
-          chmod +x $out/bin/web-search-mcp
-        '';
-      };
 
       # ============================================================================
       # AGENT SHELL SCRIPT
@@ -179,12 +93,8 @@
       packages = {
         ai-agent-runtime = aiAgentRuntime;
         agent-shell = agent-shell;
-        git-mcp-server = git-mcp-server;
-        lsp-mcp = lsp-mcp;
-        mcp-filesystem-server = mcp-filesystem-server;
-        mcp-docs-rag = mcp-docs-rag;
-        web-search-mcp = web-search-mcp;
         default = aiAgentRuntime;
+        mcp-hub = mcp-hub-repo.packages."${system}".default;
       };
 
       # ============================================================================
@@ -198,9 +108,16 @@
           git
           direnv
           agent-shell
+          nodejs_22  # For npm packages
+          self.packages.${system}.mcp-hub
+          aiAgentRuntime
+          agent-shell
         ];
 
-        packages = [aiAgentRuntime agent-shell];
+        # packages = [
+        #   aiAgentRuntime
+        #   agent-shell
+        # ];
 
         env = {
           OLLAMA_BASE_URL = "http://localhost:11434";
