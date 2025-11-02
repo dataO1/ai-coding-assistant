@@ -257,7 +257,7 @@
 
           config = lib.mkIf cfg.enable {
             home.file.".config/ai-agent/manifests.json".text = builtins.toJSON {
-              mcpServers = cfq.mcpServers;
+              mcpServers = cfg.mcpServers;
               pipelines = cfg.pipelines;
             };
             home.sessionVariables = {
