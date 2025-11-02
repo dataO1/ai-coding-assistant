@@ -272,7 +272,7 @@
 
               Service = {
                 Type = "simple";
-                ExecStart = "${pkgs.agent-shell}/bin/agent";
+                ExecStart = "${self.packages.${system}.agent-shell}/bin/agent";
                 Restart = "on-failure";
                 RestartSec = "10s";
                 Environment = [
