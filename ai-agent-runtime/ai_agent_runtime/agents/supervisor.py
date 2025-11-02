@@ -1,7 +1,7 @@
 import asyncio
 from typing import Dict, Any, List
 
-from langchain.prompts import ChatPromptTemplate
+# from langchain.prompts import ChatPromptTemplate
 
 from .base import BaseAgent, AgentOutput, AgentManifest
 from ai_agent_runtime.utils import get_logger

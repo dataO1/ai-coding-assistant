@@ -219,7 +219,7 @@
           source .venv/bin/activate
 
           # Install dependencies from requirements.txt (cached, fast)
-          ${pkgs.uv}/bin/uv pip sync requirements.txt
+          ${pkgs.uv}/bin/uv sync
 
           echo "╭──────────────────────────────────────────────────────────╮"
           echo "│  AI Agent Runtime Development Environment                │"
