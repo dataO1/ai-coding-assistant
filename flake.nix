@@ -207,6 +207,18 @@
       homeManagerModules.default = { config, lib, pkgs, ... }:
         let
           cfg = config.programs.aiAgent;
+
+          mcpServersModule = lib.types.submodule {
+            options = {
+              command = lib.mkOption { type = lib.types.str; };
+              transport = lib.mkOption { type = lib.types.str; default = "stdio"; };
+              args = lib.mkOption {
+                type = lib.types.listOf lib.types.str;
+                default = [];
+                description = "Command args";
+              };
+            };
+          };
           pipelineModule = lib.types.submodule {
             options = {
               name = lib.mkOption { type = lib.types.str; };
@@ -235,6 +247,7 @@
             enable = lib.mkEnableOption "AI Agent user configuration";
             serverUrl = lib.mkOption { type = lib.types.str; default = "http://localhost:3000"; };
             pipelines = lib.mkOption { type = lib.types.attrsOf pipelineModule; default = {}; };
+            mcpServers = lib.mkOption { type = lib.types.attrsOf mcpServersModule; default = {}; };
             enableUserService = lib.mkOption { type = lib.types.bool; default = true; };
           };
 
