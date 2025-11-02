@@ -53,7 +53,7 @@ class BaseAgent(ABC):
     _mcp_tools_cache: Optional[List[BaseTool]] = None
     _mcp_servers_config: Optional[Dict] = None
 
-     def __init__(self, manifest: AgentManifest, ollama_url: str):
+    def __init__(self, manifest: AgentManifest, ollama_url: str):
         self.manifest = manifest
         self.ollama_url = ollama_url
         self.llm = self.create_llm()
