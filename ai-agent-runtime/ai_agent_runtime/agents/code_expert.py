@@ -1,39 +1,31 @@
-import asyncio
+# ai_agent_runtime/agents/code_expert.py
 from typing import Dict, Any
-
 from .base import BaseAgent, AgentOutput
 from ai_agent_runtime.utils import get_logger
 
 logger = get_logger(__name__)
 
+
 class CodeExpertAgent(BaseAgent):
-    """Expert code generator and refactorer with MCP tool support."""
+    """Expert code generator and refactorer."""
 
     async def execute(
-        self, query: str, context: str, resolved_tools: Dict[str, Any]
+        self,
+        query: str,
+        context: str,
+        resolved_tools: Dict[str, Any],
+        agent_response: str = ""
     ) -> AgentOutput:
-        """Execute code expert agent with automatic tool calling."""
+        """Execute code expert logic."""
         try:
-            prompt = self.create_prompt(self.manifest.systemPrompt)
-
             logger.info(f"Code Expert processing: {query[:60]}...")
 
-            # LangChain handles tool calling automatically
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.llm_with_tools.invoke(
-                    prompt.format_messages(input=query)
-                ),
-            )
-
-            # Extract tool calls if any
-            tool_calls = getattr(response, "tool_calls", [])
-            if tool_calls:
-                logger.info(f"Code Expert used {len(tool_calls)} tools")
+            response = await self.process_with_tools(query)
+            tools_used = [t.name for t in self.tools] if self.tools else []
 
             return AgentOutput(
-                content=response.content,
-                toolsused=[tc.get("name", "") for tc in tool_calls],
+                content=response,
+                toolsused=tools_used,
                 metadata={"context": context},
             )
         except Exception as e:

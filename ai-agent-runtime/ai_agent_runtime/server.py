@@ -1,23 +1,19 @@
 # ai_agent_runtime/server.py
-from fastapi.responses import JSONResponse
 import os
 import json
 from pathlib import Path
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import uvicorn
 
 from ai_agent_runtime.orchestrator import MultiAgentOrchestrator
 from ai_agent_runtime.utils import get_logger
 from ai_agent_runtime.agents import BaseAgent
+from ai_agent_runtime.context import AgentContext, ContextSource
 
 logger = get_logger(__name__)
 
-# ============================================================================
-# Configuration - FROM ENVIRONMENT (set by systemd or shell)
-# ============================================================================
-
+# Configuration
 OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 AGENT_PORT = int(os.getenv("AGENT_SERVER_PORT", "3000"))
 MANIFESTS_PATH = Path(
@@ -29,7 +25,7 @@ MANIFESTS_PATH = Path(
 
 logger.info(f"Loading manifests from: {MANIFESTS_PATH}")
 
-# Load user-defined pipelines AND MCP server config
+# Load manifests
 manifests = {}
 if MANIFESTS_PATH.exists():
     with open(MANIFESTS_PATH) as f:
@@ -46,20 +42,18 @@ orchestrator = MultiAgentOrchestrator(
     manifests.get("pipelines", {})
 )
 
-# ============================================================================
-# FastAPI App
-# ============================================================================
 
 class QueryRequest(BaseModel):
     query: str
-    context: str = "shell"
+    context: str = "shell"  # Default to shell
+    working_dir: str = ""   # Empty = use home directory
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info(f"Starting AI Agent on port {AGENT_PORT}")
 
-    # Initialize MCP servers with user config from manifests.json
+    # Initialize MCP servers
     await BaseAgent.initialize_mcp_servers(
         mcp_servers_config=manifests.get("mcpServers", {})
     )
@@ -118,8 +112,40 @@ async def list_pipelines():
 @app.post("/api/query")
 async def query_endpoint(request: QueryRequest):
     try:
-        result = await orchestrator.execute(request.query, request.context)
-        return JSONResponse(status_code=200, content=result)
+        # Validate context source
+        try:
+            source = ContextSource(request.context)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid context. Must be one of: {', '.join([s.value for s in ContextSource])}"
+            )
+
+        # Determine working directory
+        working_dir = request.working_dir or str(Path.home())
+        if not Path(working_dir).is_dir():
+            logger.warning(f"Working dir {working_dir} not found, using home")
+            working_dir = str(Path.home())
+
+        # Create agent context
+        agent_context = AgentContext(
+            source=source,
+            working_dir=working_dir
+        )
+
+        logger.info(
+            f"Query from {agent_context.source.value} context "
+            f"({agent_context.working_dir}): {request.query[:60]}..."
+        )
+
+        # Execute query with context
+        result = await orchestrator.execute(
+            request.query,
+            agent_context  # Pass context to orchestrator
+        )
+        return result
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Query error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -143,12 +169,18 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def chat_completions(request: dict):
-    """OpenAI-compatible chat endpoint for Continue.dev, Avante"""
+    """OpenAI-compatible chat endpoint"""
     messages = request.get("messages", [])
     query_text = messages[-1]["content"] if messages else ""
 
     try:
-        result = await orchestrator.execute(query_text, "nvim")
+        # Default to shell context for chat completions
+        agent_context = AgentContext(
+            source=ContextSource.SHELL,
+            working_dir=str(Path.home())
+        )
+
+        result = await orchestrator.execute(query_text, agent_context)
         return {
             "id": "local",
             "object": "chat.completion",
@@ -175,4 +207,5 @@ async def chat_completions(request: dict):
 
 
 if __name__ == "__main__":
+    import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=AGENT_PORT, log_level="info")
