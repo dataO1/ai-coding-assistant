@@ -35,12 +35,9 @@ class AgentOutput(BaseModel):
 
 
 class BaseAgent(ABC):
-    """Base class for specialized agents with LangChain MCP integration.
+    """Base class for specialized agents with LangChain MCP integration."""
 
-    Uses LangChain v1 create_agent with native tool calling and context-aware middleware.
-    """
-
-    # Class-level MCP client - shared across all agents
+    # Class-level MCP client
     _mcp_client: Optional[MultiServerMCPClient] = None
     _mcp_tools_cache: Optional[List[BaseTool]] = None
     _mcp_servers_config: Optional[Dict] = None
@@ -65,7 +62,7 @@ class BaseAgent(ABC):
         cls._mcp_servers_config = mcp_servers_config or {}
 
         if not cls._mcp_servers_config:
-            logger.warning("No MCP servers configured in manifests.json")
+            logger.warning("No MCP servers configured")
             cls._mcp_tools_cache = []
             return
 
@@ -74,12 +71,8 @@ class BaseAgent(ABC):
             cls._mcp_client = MultiServerMCPClient(cls._mcp_servers_config)
             cls._mcp_tools_cache = await cls._mcp_client.get_tools()
 
-            logger.info(
-                f"✓ MCP: Connected successfully\n"
-                f"✓ Available tools: {len(cls._mcp_tools_cache)}"
-            )
+            logger.info(f"✓ MCP: Connected successfully\n✓ Available tools: {len(cls._mcp_tools_cache)}")
 
-            # Log tool breakdown
             tool_groups = {}
             for tool in cls._mcp_tools_cache:
                 prefix = tool.name.split("_")[0]
@@ -93,115 +86,117 @@ class BaseAgent(ABC):
             cls._mcp_tools_cache = []
 
     def setup_agent(self, context: Optional[AgentContext] = None):
-        """Setup agent using LangChain v1 create_agent with middleware.
-
-        Args:
-            context: AgentContext with working_dir and source
-        """
+        """Setup agent with proper tool binding verification."""
         self.agent_context = context or AgentContext()
 
-        all_tool_names = (
-            self.manifest.requiredTools + self.manifest.optionalTools
-        )
+        all_tool_names = self.manifest.requiredTools + self.manifest.optionalTools
 
         logger.info(
-            f"Requested tool names: {all_tool_names} "
-            f"(context: {self.agent_context.source.value}, "
-            f"working_dir: {self.agent_context.working_dir})"
+            f"Setting up {self.manifest.name} with tools: {all_tool_names} "
+            f"(context: {self.agent_context.source.value}, wd: {self.agent_context.working_dir})"
         )
 
         if not all_tool_names or not self._mcp_tools_cache:
-            logger.warning(
-                f"{self.manifest.name}: No tools requested or available."
-            )
+            logger.warning(f"{self.manifest.name}: No tools available")
             self.tools = []
         else:
-            # Filter tools by exact name match
             self.tools = [
-                tool
-                for tool in self._mcp_tools_cache
+                tool for tool in self._mcp_tools_cache
                 if tool.name in all_tool_names
             ]
 
-            logger.info(
-                f"{self.manifest.name}: Selected {len(self.tools)} tools: "
-                f"{[t.name for t in self.tools]}"
-            )
+            logger.info(f"{self.manifest.name}: Selected tools: {[t.name for t in self.tools]}")
 
-        # Enhance system prompt with context information
+        # Enhanced system prompt
         enhanced_prompt = self._enhance_system_prompt(
             self.manifest.systemPrompt,
             self.agent_context
         )
 
-        logger.debug(f"Enhanced system prompt:\n{enhanced_prompt}")
+        # Create middleware
+        middleware = [FileAccessMiddleware(self.agent_context)] if self.tools else []
 
-        # Create middleware for context-aware file access control
-        middleware = [FileAccessMiddleware(self.agent_context)]
+        # CRITICAL: Verify model supports tools
+        if self.tools:
+            # Test if model actually supports tool calling
+            try:
+                # Attempt to bind tools to verify compatibility
+                test_llm = self.llm.bind_tools(self.tools)
+                logger.info(f"✓ Model {self.manifest.model} successfully bound to {len(self.tools)} tools")
+            except Exception as e:
+                logger.error(f"❌ Model {self.manifest.model} failed to bind tools: {e}")
+                logger.warning("Tools may not work properly - consider using a different model")
 
-        # Create agent with enhanced context-aware prompt and middleware
+        # Create agent
+        logger.info(f"Creating agent with {len(self.tools)} tools and {len(middleware)} middleware")
         self.agent = create_agent(
             model=self.llm,
             system_prompt=enhanced_prompt,
             tools=self.tools,
-            middleware=middleware,  # ✅ MIDDLEWARE ENFORCES working_dir
+            middleware=middleware,
         )
 
-    def _enhance_system_prompt(
-        self,
-        base_prompt: str,
-        context: AgentContext
-    ) -> str:
-        """Enhance system prompt with context information.
-
-        This informs the LLM about:
-        1. Current working directory
-        2. Allowed paths to access
-        3. Context source (shell, nvim, etc.)
-        """
+    def _enhance_system_prompt(self, base_prompt: str, context: AgentContext) -> str:
+        """Enhance system prompt with context and tool usage instructions."""
         context_info = f"""
 EXECUTION CONTEXT:
 - Source: {context.source.value}
 - Working Directory: {context.working_dir}
 - Allowed Directories: {', '.join(context.allowed_roots)}
 
-When using file tools:
-1. Prefer relative paths like "hello.py" (will be resolved from working directory)
-2. Or use absolute paths within the allowed directories
-3. All file operations MUST be within allowed directories:
-   {', '.join(context.allowed_roots)}
+IMPORTANT - TOOL USAGE INSTRUCTIONS:
+You MUSTluse the available tools to complete tasks. When you need to:
+- Create a directory: Use create_directory tool
+- Write a file: Use write_file tool
+- Read a file: Use read_file tool
+- List directory: Use list_directory tool
+
+DO NOT just describe what tools to use - ACTUALLY CALL THEM.
+DO NOT output JSON describing tool calls - the system will handle tool invocation.
+
+When using file tools, you can use:
+1. Relative paths (e.g., "games/snake.py") - will resolve from working directory
+2. Absolute paths within allowed directories
+
+
+FOR ANY FILE MODIFICATION TASK:
+1. read_file(path) — Establish actual content/formatting
+2. analyze(content, requirements) — Map feedback to code changes
+3. write_file(path, updated_content) OR edit_file(path, old_text, new_text) — Apply changes
+
 """
         return base_prompt + "\n" + context_info
 
-    async def process_with_tools(
-        self,
-        query: str,
-        context: Optional[AgentContext] = None
-    ) -> str:
-        """Process query using LangChain v1 agent with context-aware middleware.
-
-        The middleware enforces file access control based on the working_dir.
-        """
-        # Setup agent if needed (or if context changed)
+    async def process_with_tools(self, query: str, context: Optional[AgentContext] = None) -> str:
+        """Process query with tool execution tracking."""
         if self.agent is None or (context and context != self.agent_context):
             await self.initialize_mcp_servers(self._mcp_servers_config)
             self.setup_agent(context)
 
         try:
             logger.info(
-                f"{self.manifest.name}: Processing query "
-                f"(context: {self.agent_context.source.value}, "
-                f"allowed_roots: {self.agent_context.allowed_roots})"
+                f"{self.manifest.name}: Processing query with {len(self.tools)} tools available"
             )
 
-            # Use native async invoke - create_agent returns a Runnable
-            result = await self.agent.ainvoke({
-                "messages": [{"role": "user", "content": query}]
-            })
+            result = await self.agent.ainvoke({"messages": [{"role": "user", "content": query}]})
 
-            # Extract output
+            # Extract output and log tool usage
             if isinstance(result, dict) and "messages" in result:
                 messages = result["messages"]
+
+                # Check for actual tool calls in messages
+                tool_calls_found = []
+                for msg in messages:
+                    if hasattr(msg, "tool_calls") and msg.tool_calls:
+                        tool_calls_found.extend([tc.get("name", "unknown") for tc in msg.tool_calls])
+                    elif isinstance(msg, dict) and "tool_calls" in msg and msg["tool_calls"]:
+                        tool_calls_found.extend([tc.get("name", "unknown") for tc in msg["tool_calls"]])
+
+                if tool_calls_found:
+                    logger.info(f"✓ Tools actually invoked: {tool_calls_found}")
+                else:
+                    logger.warning(f"❌ No tool calls detected - LLM may not be using tools properly")
+
                 if messages:
                     last_message = messages[-1]
                     if hasattr(last_message, "content"):
@@ -216,24 +211,22 @@ When using file tools:
             return f"Error: {str(e)}"
 
     def create_llm(self):
-        """Create ChatOllama LLM."""
+        """Create ChatOllama LLM with explicit tool support configuration."""
         return ChatOllama(
             model=self.manifest.model,
             base_url=self.ollama_url,
             temperature=self.get_temperature(),
             top_p=0.9,
+            # Ensure model knows it should use tools
+            num_ctx=8192,  # Larger context for tool schemas
         )
 
     def get_temperature(self) -> float:
         """Get appropriate temperature for this agent."""
         return 0.2
 
-    async def process(
-        self,
-        query: str,
-        context: Optional[AgentContext] = None
-    ) -> AgentOutput:
-        """Process a query with automatic MCP tool integration and context enforcement."""
+    async def process(self, query: str, context: Optional[AgentContext] = None) -> AgentOutput:
+        """Process query with MCP tool integration."""
         content = await self.process_with_tools(query, context)
         return await self.execute(query, context, {}, content)
 
