@@ -1,0 +1,176 @@
+# pyproject.toml - Poetry Configuration with LangChain 1.x
+
+[tool.poetry]
+name = "agentic-ide-backend"
+version = "0.1.0"
+description = "Agentic IDE Backend - LLM-orchestrated multi-agent code generation"
+authors = ["Agentic IDE Team"]
+readme = "README.md"
+repository = "https://github.com/agentic-ide/backend"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+
+# FastAPI & HTTP
+fastapi = "^0.104.1"
+uvicorn = { version = "^0.24.0", extras = ["standard"] }
+pydantic = "^2.5.0"
+pydantic-settings = "^2.1.0"
+
+# LangChain 1.x (latest architecture)
+langchain = "^0.1.0"
+langchain-community = "^0.0.10"
+langchain-openai = "^0.0.7"  # For potential future OpenAI support
+langchain-text-splitters = "^0.0.1"
+
+# LangGraph (state machine orchestration)
+langgraph = "^0.0.25"
+
+# LLM Integration
+ollama = "^0.1.20"
+httpx = "^0.25.2"
+
+# Vector Database
+qdrant-client = "^2.7.0"
+sentence-transformers = "^2.2.2"
+
+# Embeddings & Reranking
+huggingface-hub = "^0.19.4"
+rank-bm25 = "^0.2.2"
+
+# Git Operations
+gitpython = "^3.1.40"
+
+# Configuration
+pyyaml = "^6.0.1"
+python-dotenv = "^1.0.0"
+
+# Logging & Monitoring
+structlog = "^23.3.0"
+python-json-logger = "^2.0.7"
+
+# Data Validation & Serialization
+marshmallow = "^3.20.1"
+
+# Async & Concurrency
+asyncio-contextmanager = "^1.0.0"
+aiofiles = "^23.2.1"
+
+# Type Checking
+typing-extensions = "^4.8.0"
+
+# Testing (dev dependencies)
+pytest = "^7.4.3"
+pytest-asyncio = "^0.21.1"
+pytest-cov = "^4.1.0"
+pytest-harvest = "^1.11.1"
+pytest-xdist = "^3.5.0"
+pytest-mock = "^3.12.0"
+
+# Code Quality
+ruff = "^0.1.8"
+black = "^23.12.0"
+isort = "^5.13.2"
+mypy = "^1.7.1"
+
+# Development Tools
+ipython = "^8.18.1"
+ipdb = "^0.13.13"
+debugpy = "^1.8.0"
+
+[tool.poetry.group.dev.dependencies]
+# Already included via testing section above
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.black]
+line-length = 100
+target-version = ["py311"]
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+  | \.hg
+  | \.mypy_cache
+  | \.tox
+  | \.venv
+  | _build
+  | buck-out
+  | build
+  | dist
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+skip_glob = [".venv", "build", "dist"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+strict_optional = true
+
+[[tool.mypy.overrides]]
+module = [
+    "sentence_transformers.*",
+    "qdrant_client.*",
+    "ollama.*",
+    "gitpython.*"
+]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=backend --cov-report=term-missing --cov-report=html -v"
+markers = [
+    "unit: Unit tests",
+    "integration: Integration tests",
+    "slow: Slow tests",
+]
+
+[tool.coverage.run]
+source = ["backend"]
+omit = [
+    "*/tests/*",
+    "*/test_*.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [".venv", "build", "dist"]
+select = [
+    "E",   # Errors
+    "W",   # Warnings
+    "F",   # PyFlakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+]
+ignore = [
+    "E501",  # Line too long (black handles this)
+    "E741",  # Ambiguous variable name
+]
