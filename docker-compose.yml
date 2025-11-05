@@ -1,0 +1,32 @@
+version: '3.8'
+
+services:
+  # Agent Network service
+  agent-network:
+    build: .
+    environment:
+      LLM_PROVIDER: openai
+      LLM_MODEL: gpt-4
+      LLM_API_KEY: ${LLM_API_KEY}
+      DB_TYPE: chromadb
+      DB_PATH: /var/lib/agent-network/vectordb
+      DOCS_PATH: /var/lib/agent-network/docs
+      MAX_WORKERS: 3
+    volumes:
+      - ./docs:/var/lib/agent-network/docs:ro
+      - agent-db:/var/lib/agent-network/vectordb
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # Optional: HelixDB (if using external instance)
+  # helix-db:
+  #   image: helix-db:latest
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - helix-data:/data
+
+volumes:
+  agent-db:
+  # helix-data:

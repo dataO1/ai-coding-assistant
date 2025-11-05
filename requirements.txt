@@ -1,0 +1,36 @@
+# AG2 Agent Network Requirements
+# Production-grade multi-agent orchestration
+
+# Core AG2 framework (v0.9+)
+ag2==0.9.0+
+# Note: can also use 'autogen' package (same thing)
+
+# LLM Providers (choose based on your setup)
+openai>=1.0.0  # For GPT models
+# anthropic>=0.10.0  # For Claude models
+# ollama>=0.1.0  # For local Ollama models
+
+# Vector Database & RAG
+chromadb>=0.5.0  # Embedded vector DB used by AG2
+# qdrant-client>=2.7.0  # Alternative vector DB
+# milvus-cli>=3.0.0  # For HelixDB compatibility
+
+# Task Management & Async
+asyncio-contextmanager>=1.0.0
+python-dotenv>=1.0.0
+
+# Data Processing
+numpy>=1.24.0
+pandas>=2.0.0
+
+# Utilities
+pydantic>=2.0.0  # Data validation
+loguru>=0.7.0  # Enhanced logging
+pyyaml>=6.0  # Config management
+
+# Development (optional)
+pytest>=7.0.0
+pytest-asyncio>=0.21.0
+black>=23.0.0
+flake8>=6.0.0
+mypy>=1.0.0
