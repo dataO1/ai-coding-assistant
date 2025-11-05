@@ -9,74 +9,74 @@ readme = "README.md"
 repository = "https://github.com/agentic-ide/backend"
 
 [tool.poetry.dependencies]
-python = "^3.11"
+python = "^3.12"
 
 # FastAPI & HTTP
-fastapi = "^0.104.1"
-uvicorn = { version = "^0.24.0", extras = ["standard"] }
-pydantic = "^2.5.0"
-pydantic-settings = "^2.1.0"
+fastapi = "*"
+uvicorn = "*"
+pydantic = "*"
+pydantic-settings = "*"
 
 # LangChain 1.x (latest architecture)
-langchain = "^0.1.0"
-langchain-community = "^0.0.10"
-langchain-openai = "^0.0.7"  # For potential future OpenAI support
-langchain-text-splitters = "^0.0.1"
+langchain = "^1.0.3"
+langchain-community = "*"
+langchain-openai = "*"
+langchain-text-splitters = "*"
 
 # LangGraph (state machine orchestration)
-langgraph = "^0.0.25"
+langgraph = "*"
 
 # LLM Integration
-ollama = "^0.1.20"
-httpx = "^0.25.2"
+# ollama = "^0.6.0"
+httpx = "*"
 
 # Vector Database
-qdrant-client = "^2.7.0"
-sentence-transformers = "^2.2.2"
+qdrant-client = "*"
+sentence-transformers = "*"
 
 # Embeddings & Reranking
-huggingface-hub = "^0.19.4"
-rank-bm25 = "^0.2.2"
+huggingface-hub = "*"
+rank-bm25 = "*"
 
 # Git Operations
-gitpython = "^3.1.40"
+gitpython = "*"
 
 # Configuration
-pyyaml = "^6.0.1"
-python-dotenv = "^1.0.0"
+pyyaml = "*"
+python-dotenv = "*"
 
 # Logging & Monitoring
-structlog = "^23.3.0"
-python-json-logger = "^2.0.7"
+structlog = "*"
+python-json-logger = "*"
 
 # Data Validation & Serialization
-marshmallow = "^3.20.1"
+marshmallow = "*"
 
 # Async & Concurrency
-asyncio-contextmanager = "^1.0.0"
-aiofiles = "^23.2.1"
+asyncio-contextmanager = "*"
+aiofiles = "*"
 
 # Type Checking
-typing-extensions = "^4.8.0"
+typing-extensions = "*"
 
 # Testing (dev dependencies)
-pytest = "^7.4.3"
-pytest-asyncio = "^0.21.1"
-pytest-cov = "^4.1.0"
-pytest-harvest = "^1.11.1"
-pytest-xdist = "^3.5.0"
-pytest-mock = "^3.12.0"
+pytest = "*"
+pytest-asyncio = "*"
+pytest-cov = "*"
+pytest-harvest = "*"
+pytest-xdist = "*"
+pytest-mock = "*"
 
 # Code Quality
-ruff = "^0.1.8"
-black = "^23.12.0"
-isort = "^5.13.2"
-mypy = "^1.7.1"
+ruff = "*"
+black = "*"
+isort = "*"
+mypy = "*"
 
 # Development Tools
-ipython = "^8.18.1"
-ipdb = "^0.13.13"
-debugpy = "^1.8.0"
+ipython = "*"
+ipdb = "*"
+debugpy = "*"
 
 [tool.poetry.group.dev.dependencies]
 # Already included via testing section above
@@ -87,7 +87,7 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.black]
 line-length = 100
-target-version = ["py311"]
+target-version = ["py312"]
 include = '\.pyi?$'
 exclude = '''
 /(
@@ -109,7 +109,7 @@ line_length = 100
 skip_glob = [".venv", "build", "dist"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
@@ -125,7 +125,7 @@ strict_optional = true
 module = [
     "sentence_transformers.*",
     "qdrant_client.*",
-    "ollama.*",
+    # "ollama.*",
     "gitpython.*"
 ]
 ignore_missing_imports = true
@@ -159,7 +159,7 @@ exclude_lines = [
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py312"
 exclude = [".venv", "build", "dist"]
 select = [
     "E",   # Errors
