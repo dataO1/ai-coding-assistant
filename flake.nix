@@ -23,7 +23,8 @@
             poetry
             pyright
             black
-            flake8
+            python311Packages.flake8
+            self.packages.${system}.agent-network
           ];
 
           shellHook = ''
